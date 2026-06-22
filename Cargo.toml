@@ -55,3 +55,5 @@ tokio-util = { version = "0", features = ["codec"] }
 tokio-vsock = "0.7"
 # the messagepack codec tokio-serde uses, to assert the on-wire Status layout
 rmp-serde = "1"
+# musl builds use jemalloc instead of the default musl allocator (same approach as ripgrep)
+jemallocator = "0.5"

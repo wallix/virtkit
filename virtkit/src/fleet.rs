@@ -571,6 +571,9 @@ fn boot_service(
         cmdline.push_str(&format!(" VIRTKIT_VIRTIOFS={virtiofs}"));
     }
 
+    // fleet units are reached over the switch network, not vsock exec; only the
+    // guest→host switch bridge needs mapping.
+    let vsock_ports = vec![crate::vmm::VsockPort::bridge(&vsock, net_port)];
     let spec = crate::vmm::VmSpec {
         kernel: kernel.to_path_buf(),
         cmdline,
@@ -579,6 +582,7 @@ fn boot_service(
         shares,
         vsock_cid: svc.cid,
         vsock_socket: vsock,
+        vsock_ports,
         cpus,
         mem,
         shared_mem,
@@ -711,6 +715,9 @@ fn boot_vm(
         b.name
     );
 
+    // The builder VM is reached over the switch network, not vsock exec; only the
+    // guest→host switch bridge needs mapping.
+    let vsock_ports = vec![crate::vmm::VsockPort::bridge(&vsock, net_port)];
     // shared=on is REQUIRED for virtiofs (the workdir/gitdir shares).
     let spec = crate::vmm::VmSpec {
         kernel: kernel.to_path_buf(),
@@ -720,6 +727,7 @@ fn boot_vm(
         shares,
         vsock_cid: b.cid,
         vsock_socket: vsock,
+        vsock_ports,
         cpus: b.cpus,
         mem: b.mem.clone(),
         shared_mem: true,

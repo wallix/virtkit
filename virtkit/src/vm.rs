@@ -282,6 +282,9 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         shares,
         vsock_cid: 3,
         vsock_socket: ctx.vsock_sock(),
+        // CI reaches the guest agent over the exec channel only (networking is a leased
+        // tap, not the vsock switch).
+        vsock_ports: vec![crate::vmm::VsockPort::exec(&ctx.vsock_sock(), cfg.vm.vsock_port)],
         cpus,
         mem: mem.clone(),
         shared_mem: true,

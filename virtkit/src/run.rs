@@ -307,6 +307,14 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
         "virtkit: booting cloud-hypervisor (cpus={}, mem={})",
         args.cpus, args.mem
     );
+    // exec channel always; the switch and ssh-agent bridges only when set up above.
+    let mut vsock_ports = vec![crate::vmm::VsockPort::exec(&vsock, VSOCK_PORT)];
+    if args.net {
+        vsock_ports.push(crate::vmm::VsockPort::bridge(&vsock, NET_VSOCK_PORT));
+    }
+    if ssh.is_some() {
+        vsock_ports.push(crate::vmm::VsockPort::bridge(&vsock, SSH_AGENT_VSOCK_PORT));
+    }
     let spec = crate::vmm::VmSpec {
         kernel: args.kernel.clone(),
         cmdline,
@@ -315,6 +323,7 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
         shares,
         vsock_cid: 3,
         vsock_socket: vsock.clone(),
+        vsock_ports,
         cpus: args.cpus,
         mem: args.mem.clone(),
         shared_mem,
@@ -791,6 +800,10 @@ pub(crate) async fn boot_session(
         cmdline.push_str(&frag);
     }
 
+    let mut vsock_ports = vec![crate::vmm::VsockPort::exec(&vsock, VSOCK_PORT)];
+    if net {
+        vsock_ports.push(crate::vmm::VsockPort::bridge(&vsock, NET_VSOCK_PORT));
+    }
     // virtio-fs (the context share) requires shared guest memory (shared_mem).
     let spec = crate::vmm::VmSpec {
         kernel: kernel.to_path_buf(),
@@ -800,6 +813,7 @@ pub(crate) async fn boot_session(
         shares,
         vsock_cid: 3,
         vsock_socket: vsock.clone(),
+        vsock_ports,
         cpus,
         mem: mem.to_string(),
         shared_mem: context.is_some(),

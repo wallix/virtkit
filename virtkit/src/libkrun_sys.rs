@@ -22,8 +22,8 @@ use anyhow::{Result, bail};
 // (rlib -> shares virtkit's std; compiler-checked signatures). Every call returns
 // >= 0 on success, a negative errno on failure.
 use krun::{
-    krun_add_disk2, krun_create_ctx, krun_disable_implicit_init, krun_init_log, krun_set_kernel,
-    krun_set_console_output, krun_set_vm_config, krun_start_enter,
+    krun_add_disk2, krun_add_vsock_port2, krun_create_ctx, krun_disable_implicit_init,
+    krun_init_log, krun_set_console_output, krun_set_kernel, krun_set_vm_config, krun_start_enter,
 };
 
 use crate::vmm::{Disk, VmSpec};
@@ -102,6 +102,19 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
         // backing chain (KRUN_DISK_FORMAT_QCOW2); raw bases use KRUN_DISK_FORMAT_RAW.
         for (i, disk) in spec.disks.iter().enumerate() {
             add_disk(ctx, i, disk)?;
+        }
+
+        // vsock ports. listen=true: libkrun listens on the host unix socket and
+        // forwards host connections to the guest port (the exec channel). listen=false:
+        // the guest dials the port and libkrun forwards to the host socket, where the
+        // host already listens (the switch and ssh-agent bridges). cloud-hypervisor
+        // gets the equivalent wiring from its single hybrid socket.
+        for vp in &spec.vsock_ports {
+            let path = cstr(&vp.socket.to_string_lossy());
+            ck(
+                "krun_add_vsock_port2",
+                krun_add_vsock_port2(ctx, vp.port, path.as_ptr(), vp.listen),
+            )?;
         }
 
         // our cmdline's init= is PID 1; don't let libkrun inject /init.krun.

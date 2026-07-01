@@ -9,7 +9,7 @@
 //! in-process VMM (e.g. libkrun) plug in later as a self-subcommand without
 //! touching callers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// A virtio-blk disk, attached in order (first = `/dev/vda`, then `vdb`, …).
@@ -62,6 +62,46 @@ pub enum Net {
     Tap { tap: String, mac: String },
 }
 
+/// A guest vsock port mapped to a host-side unix socket. This is how the libkrun
+/// backend is told about vsock channels; cloud-hypervisor derives the same wiring
+/// from its hybrid `--vsock` socket plus the `_<port>` suffix convention and ignores
+/// this list.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct VsockPort {
+    pub port: u32,
+    pub socket: PathBuf,
+    /// `true`: the VMM listens on `socket` and forwards host connections to the guest
+    /// `port` (host→guest, e.g. the exec channel). `false`: the guest dials `port` and
+    /// the VMM forwards to `socket`, where the host already listens (guest→host, e.g.
+    /// the switch and ssh-agent bridges).
+    pub listen: bool,
+}
+
+impl VsockPort {
+    /// Exec-style channel: the VMM listens on `base` and forwards host connections to
+    /// guest `port`. Mirrors cloud-hypervisor's hybrid base socket (host→guest).
+    pub fn exec(base: &Path, port: u32) -> Self {
+        VsockPort {
+            port,
+            socket: base.to_path_buf(),
+            listen: true,
+        }
+    }
+
+    /// Guest→host bridge (switch, ssh-agent): the guest dials `port` and the VMM
+    /// forwards to the host listener at `<base>_<port>` — the same `_<port>` suffix
+    /// the hybrid-vsock host sockets already use.
+    pub fn bridge(base: &Path, port: u32) -> Self {
+        let mut socket = base.as_os_str().to_owned();
+        socket.push(format!("_{port}"));
+        VsockPort {
+            port,
+            socket: socket.into(),
+            listen: false,
+        }
+    }
+}
+
 /// Everything needed to boot one microVM, independent of the VMM.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct VmSpec {
@@ -75,6 +115,9 @@ pub struct VmSpec {
     pub shares: Vec<FsShare>,
     pub vsock_cid: u32,
     pub vsock_socket: PathBuf,
+    /// Per-port vsock map for the libkrun backend (see [`VsockPort`]);
+    /// cloud-hypervisor ignores it and uses `vsock_socket` + the `_<port>` convention.
+    pub vsock_ports: Vec<VsockPort>,
     pub cpus: u32,
     /// Memory size token, e.g. `"8G"`. [`Self::shared_mem`] appends `,shared=on`,
     /// which virtio-fs requires (and is harmless without).
@@ -202,6 +245,7 @@ mod tests {
             }],
             vsock_cid: 3,
             vsock_socket: "/job/vsock.sock".into(),
+            vsock_ports: vec![],
             cpus: 4,
             mem: "8G".into(),
             shared_mem: true,
@@ -266,6 +310,7 @@ mod tests {
             shares: vec![],
             vsock_cid: 3,
             vsock_socket: "/w/vsock.sock".into(),
+            vsock_ports: vec![],
             cpus: 2,
             mem: "2G".into(),
             shared_mem: false,

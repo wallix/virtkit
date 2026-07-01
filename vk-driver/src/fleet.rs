@@ -546,6 +546,7 @@ fn boot_service(
             socket: workdir_sock,
             host_dir: workdir.to_path_buf(),
             read_only: true,
+            dax: false,
         });
         virtiofs.push_str("workdir:/workdir");
         // git worktree: share the main repo's git dir at the SAME guest path so the
@@ -560,6 +561,7 @@ fn boot_service(
                 socket: git_sock,
                 host_dir: gs.to_path_buf(),
                 read_only: true,
+                dax: false,
             });
             virtiofs.push_str(&format!(",gitdir:{}", gs.display()));
         }
@@ -638,6 +640,7 @@ fn boot_vm(
         socket: workdir_sock,
         host_dir: b.workdir.clone(),
         read_only: false,
+        dax: false,
     }];
     let mut virtiofs = String::from("workdir:/workdir");
 
@@ -654,6 +657,7 @@ fn boot_vm(
             socket: git_sock,
             host_dir: gs.to_path_buf(),
             read_only: false,
+            dax: false,
         });
         virtiofs.push_str(&format!(",gitdir:{}", gs.display()));
     }
@@ -685,6 +689,7 @@ fn boot_vm(
             socket: sock,
             host_dir: share.host_dir.clone(),
             read_only: share.readonly,
+            dax: false,
         });
     }
 

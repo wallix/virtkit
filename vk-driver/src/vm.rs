@@ -147,6 +147,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
             socket: vfsd_sock,
             host_dir: share.dir.clone(),
             read_only: share.readonly,
+            dax: false,
         });
     }
 
@@ -173,6 +174,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
             socket: sock,
             host_dir: dir.clone(),
             read_only: true,
+            dax: false,
         });
         cmdline.push_str(" VIRTKIT_TOOLS=vktools:/run/virtkit-tools");
     }

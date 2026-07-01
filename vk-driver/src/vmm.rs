@@ -59,6 +59,10 @@ pub struct FsShare {
     pub socket: PathBuf,
     pub host_dir: PathBuf,
     pub read_only: bool,
+    /// Offer a virtio-fs DAX window for this share (libkrun only; see [`dax_enabled`]).
+    /// The guest must also mount it with `-o dax`. Defaults off.
+    #[serde(default)]
+    pub dax: bool,
 }
 
 /// Guest networking. `switch`-mode guests add no device here — the in-guest agent
@@ -251,6 +255,14 @@ pub fn libkrun_selected() -> bool {
     )
 }
 
+/// Whether to offer virtio-fs DAX for shares. Opt-in via `VIRTKIT_DAX=1`, and only for
+/// libkrun — it provides the DAX window in-process; the cloud-hypervisor path here does
+/// not. A perf experiment for the write-heavy `/work` compile share; DAX maps files into
+/// the guest, avoiding a FUSE round-trip per request. Off by default.
+pub fn dax_enabled() -> bool {
+    libkrun_selected() && matches!(std::env::var("VIRTKIT_DAX").ok().as_deref(), Some("1"))
+}
+
 /// The selected VMM backend for a boot.
 pub fn selected(cloud_hypervisor: &Path) -> Box<dyn Vmm> {
     #[cfg(feature = "libkrun")]
@@ -304,6 +316,7 @@ mod tests {
                 socket: "/job/vfsd.sock".into(),
                 host_dir: "/host/workdir".into(),
                 read_only: false,
+                dax: false,
             }],
             vsock_cid: 3,
             vsock_socket: "/job/vsock.sock".into(),

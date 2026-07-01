@@ -131,13 +131,17 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
 
         // virtio-fs shares. libkrun has no external vhost-user-fs, so it mounts the host
         // directory directly with its built-in virtio-fs; no separate virtiofsd runs
-        // (the boot sites skip it when libkrun is selected). shm_size 0 = no DAX window.
+        // (the boot sites skip it when libkrun is selected). A share that asked for DAX
+        // gets a window sized to guest RAM (files map straight in, no FUSE round-trip per
+        // request); shm_size 0 = no DAX. The guest must also mount it with `-o dax`.
+        let dax_window = (mem_mib(&spec.mem)? as u64) << 20;
         for share in &spec.shares {
             let tag = cstr(&share.tag);
             let dir = cstr(&share.host_dir.to_string_lossy());
+            let shm = if share.dax { dax_window } else { 0 };
             ck(
                 "krun_add_virtiofs3",
-                krun_add_virtiofs3(ctx, tag.as_ptr(), dir.as_ptr(), 0, share.read_only),
+                krun_add_virtiofs3(ctx, tag.as_ptr(), dir.as_ptr(), shm, share.read_only),
             )?;
         }
 

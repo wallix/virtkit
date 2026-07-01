@@ -306,12 +306,17 @@ async fn build_and_boot(args: &RunArgs, work: &Path, agent: &Path, kernel: &Path
                 &[],
             )?);
         }
-        cmdline.push_str(&format!(" VIRTKIT_VIRTIOFS=work:{WORKDIR_MOUNT}"));
+        let dax = crate::vmm::dax_enabled();
+        cmdline.push_str(&format!(
+            " VIRTKIT_VIRTIOFS=work:{WORKDIR_MOUNT}{}",
+            if dax { ":dax" } else { "" }
+        ));
         shares.push(crate::vmm::FsShare {
             tag: "work".into(),
             socket: sock,
             host_dir: host_dir.clone(),
             read_only: false,
+            dax,
         });
         true
     } else {
@@ -837,12 +842,17 @@ pub(crate) async fn boot_session(
         if !crate::vmm::libkrun_selected() {
             virtiofsd = Some(crate::fleet::spawn_virtiofsd(&sock, ctx, true, &[], &[])?);
         }
-        cmdline.push_str(&format!(" VIRTKIT_VIRTIOFS=context:{CONTEXT_MOUNT}"));
+        let dax = crate::vmm::dax_enabled();
+        cmdline.push_str(&format!(
+            " VIRTKIT_VIRTIOFS=context:{CONTEXT_MOUNT}{}",
+            if dax { ":dax" } else { "" }
+        ));
         shares.push(crate::vmm::FsShare {
             tag: "context".into(),
             socket: sock,
             host_dir: ctx.to_path_buf(),
             read_only: true,
+            dax,
         });
     }
 

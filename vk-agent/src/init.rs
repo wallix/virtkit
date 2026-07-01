@@ -494,12 +494,21 @@ fn mount_virtiofs(cmdline: &HashMap<String, String>) {
     };
     let _ = run_cmd("modprobe", &["virtiofs"]); // built-in on our kernel; harmless
     for entry in spec.split(',').filter(|e| !e.is_empty()) {
-        let Some((tag, path)) = entry.split_once(':') else {
+        // tag:path, with an optional trailing ":dax" the host adds when it offered a DAX
+        // window for the share (see vk-driver's vmm::dax_enabled).
+        let mut parts = entry.splitn(3, ':');
+        let (Some(tag), Some(path)) = (parts.next(), parts.next()) else {
             warn!("virtkit-agent init: bad VIRTKIT_VIRTIOFS entry {entry:?} (want tag:path)");
             continue;
         };
+        let dax = parts.next() == Some("dax");
         let _ = std::fs::create_dir_all(path);
-        if let Err(e) = mount(tag, path, "virtiofs", 0) {
+        let res = if dax {
+            mount_data(tag, path, "virtiofs", 0, "dax")
+        } else {
+            mount(tag, path, "virtiofs", 0)
+        };
+        if let Err(e) = res {
             warn!("virtkit-agent init: mount virtiofs {tag} at {path} failed: {e}");
         }
     }

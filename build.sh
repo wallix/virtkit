@@ -32,10 +32,14 @@ since()   { echo "build.sh: $1 in $(fmt_dur $(($SECONDS - $2)))" >&2; }
 
 USE_VIRTKIT=""
 BOOTSTRAP_CHECK=""
+VMM=libkrun          # dogfood VMM backend: libkrun (default) or cloud-hypervisor
+DAX=""               # opt-in libkrun virtio-fs DAX for the dogfood compile
 for arg in "$@"; do
   case "$arg" in
     --use-virtkit=*) USE_VIRTKIT="${arg#*=}" ;;
     --bootstrap-check) BOOTSTRAP_CHECK=1 ;;
+    --vmm=libkrun|--vmm=cloud-hypervisor) VMM="${arg#*=}" ;;
+    --dax) DAX=1 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -53,6 +57,12 @@ if [ -n "$BOOTSTRAP_CHECK" ]; then
     echo "--bootstrap-check needs $OUT/vmlinux (run ./build-kernel.sh first)" >&2
     exit 1
   }
+  if [ "$VMM" = cloud-hypervisor ]; then
+    [ -x "$OUT/cloud-hypervisor" ] || command -v cloud-hypervisor >/dev/null || {
+      echo "--bootstrap-check --vmm=cloud-hypervisor needs cloud-hypervisor (in PATH or at $OUT/cloud-hypervisor)" >&2
+      exit 1
+    }
+  fi
 fi
 
 # Reproducibility: SOURCE_DATE_EPOCH neutralises any build timestamp, and the build
@@ -93,7 +103,24 @@ if [ -n "$USE_VIRTKIT" ]; then
   # vk is self-contained (embedded kernel + agent), so DIST needs only the vk binary.
   VK="$USE_VIRTKIT/vk"
   [ -e "$VK" ] || { echo "missing $VK (need a populated --use-virtkit dir)" >&2; exit 1; }
-  # vk boots the build microVM on its built-in libkrun backend — no external VMM.
+
+  # VMM backend: built-in libkrun by default (no external binary); cloud-hypervisor for
+  # a comparison run needs the CH binary and VIRTKIT_VMM set. --dax opts the libkrun
+  # virtio-fs /work share into DAX (a perf experiment; libkrun only).
+  vmm_env=()
+  ch_args=()
+  if [ "$VMM" = cloud-hypervisor ]; then
+    if [ -x "$USE_VIRTKIT/cloud-hypervisor" ]; then ch="$USE_VIRTKIT/cloud-hypervisor"
+    elif command -v cloud-hypervisor >/dev/null; then ch=$(command -v cloud-hypervisor)
+    else
+      echo "--vmm=cloud-hypervisor needs cloud-hypervisor (in PATH or at $USE_VIRTKIT/cloud-hypervisor)" >&2
+      exit 1
+    fi
+    vmm_env+=(VIRTKIT_VMM=cloud-hypervisor)
+    ch_args=(--cloud-hypervisor "$ch")
+  fi
+  [ -n "$DAX" ] && vmm_env+=(VIRTKIT_DAX=1)
+
   cache_args=()
   [ -n "${VK_CACHE:-}" ] && cache_args=(--cache-registry "$VK_CACHE")
 
@@ -109,13 +136,14 @@ if [ -n "$USE_VIRTKIT" ]; then
   # A release compile of the whole workspace is CPU- and memory-hungry, so size the
   # build VM for it: all the host's CPUs (--cpus host) for parallelism, and enough
   # RAM that rustc is not OOM-killed (the `run` defaults are 2 cpus / 1G).
-  "$VK" run \
+  env "${vmm_env[@]}" "$VK" run \
     --file .devcontainer/Dockerfile \
     --context .devcontainer \
     --workdir "$PWD" \
     --net \
     --cpus host \
     --mem 8G \
+    "${ch_args[@]}" \
     "${cache_args[@]}" \
     -- "${exports}${BUILD_CMD}"
 else
@@ -134,7 +162,7 @@ else
     "$IMAGE" \
     sh -c "$BUILD_CMD"
 fi
-since "compile ($([ -n "$USE_VIRTKIT" ] && echo libkrun microVM || echo docker))" "$compile_start"
+since "compile ($([ -n "$USE_VIRTKIT" ] && echo "$VMM microVM${DAX:+ +dax}" || echo docker))" "$compile_start"
 
 mkdir -p "$OUT"
 # Replace atomically (write a temp, then rename): a plain cp truncates the destination and
@@ -151,8 +179,14 @@ done
 ( cd "$OUT" && sha256sum vk > vk.sha256 && sha256sum vk-agent > vk-agent.sha256 )
 base_image=$(sed -nE 's/^FROM (rust:.*)$/\1/p' .devcontainer/Dockerfile)
 toolchain=$(sed -nE 's/^channel = "(.*)"$/\1/p' rust-toolchain.toml)
-commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
-[ -n "$(git status --porcelain 2>/dev/null)" ] && commit="$commit (dirty)"
+# VK_GIT_COMMIT lets the caller supply the commit — the --bootstrap-check rebuild runs
+# in a tree copy with no .git, so it inherits the outer build's commit instead of "unknown".
+if [ -n "${VK_GIT_COMMIT:-}" ]; then
+  commit="$VK_GIT_COMMIT"
+else
+  commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+  [ -n "$(git status --porcelain 2>/dev/null)" ] && commit="$commit (dirty)"
+fi
 cat > "$OUT/build-info.txt" <<EOF
 # virtkit reproducible build manifest
 # Verify: git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk.sha256 dist/vk-agent.sha256
@@ -190,7 +224,9 @@ if [ -n "$BOOTSTRAP_CHECK" ]; then
   mkdir -p "$boot_tmp/$OUT"
   cp "$boot_dist/vmlinux" "$boot_tmp/$OUT/vmlinux"
   rebuild_start=$SECONDS
-  ( cd "$boot_tmp" && ./build.sh --use-virtkit="$boot_dist" )
+  # Same VMM/DAX choice as requested, and the commit threaded in (the copy has no .git).
+  ( cd "$boot_tmp" && VK_GIT_COMMIT="$commit" ./build.sh \
+      --use-virtkit="$boot_dist" --vmm="$VMM" ${DAX:+--dax} )
   since "bootstrap rebuild" "$rebuild_start"
 
   echo

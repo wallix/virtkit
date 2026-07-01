@@ -22,8 +22,8 @@ use anyhow::{Result, bail};
 // (rlib -> shares virtkit's std; compiler-checked signatures). Every call returns
 // >= 0 on success, a negative errno on failure.
 use krun::{
-    krun_add_disk2, krun_add_virtio_console_default, krun_create_ctx, krun_disable_implicit_init,
-    krun_init_log, krun_set_kernel, krun_set_vm_config, krun_start_enter,
+    krun_add_disk2, krun_create_ctx, krun_disable_implicit_init, krun_init_log, krun_set_kernel,
+    krun_set_console_output, krun_set_vm_config, krun_start_enter,
 };
 
 use crate::vmm::{Disk, VmSpec};
@@ -70,15 +70,19 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
             krun_set_vm_config(ctx, spec.cpus as u8, mem_mib(&spec.mem)?),
         )?;
 
-        // guest console (hvc0) -> our stdio (required in libkrun 2.0; 1.x auto-added one).
+        // Guest console -> the serial-log file, matching CH's `--serial file=`; the
+        // orchestrator reads that file for diagnostics. libkrun routes its implicit
+        // console (a virtio-console, hvc0) here, so we leave the implicit console on
+        // and normalise the cmdline's console token from CH's ttyS0 to hvc0 below.
+        let serial_log = cstr(&spec.serial_log.to_string_lossy());
         ck(
-            "krun_add_virtio_console_default",
-            krun_add_virtio_console_default(ctx, 0, 1, 2),
+            "krun_set_console_output",
+            krun_set_console_output(ctx, serial_log.as_ptr()),
         )?;
 
         // our own kernel + cmdline; PID 1 is chosen by `init=` on the cmdline.
         let kernel = cstr(&spec.kernel.to_string_lossy());
-        let cmdline = cstr(&spec.cmdline);
+        let cmdline = cstr(&spec.cmdline.replace("console=ttyS0", "console=hvc0"));
         let initramfs = spec
             .initramfs
             .as_ref()

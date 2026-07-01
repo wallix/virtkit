@@ -505,9 +505,13 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
-    // `virtkit virtiofsd …` — the bundled vhost-user virtio-fs daemon. Dispatched
+/// Subprocess dispatches that must run before any Tokio runtime is created: they do
+/// no async work themselves, and libkrun's qcow2 backend (imago) drives its own
+/// runtime — so dispatching them inside a `#[tokio::main]` runtime panics with
+/// "Cannot start a runtime from within a runtime". The CLI proper runs on the runtime
+/// entered in `cli_main`.
+fn main() -> ExitCode {
+    // `vk virtiofsd …` — the bundled vhost-user virtio-fs daemon. Dispatched
     // before the clap CLI / config load (it takes virtiofsd's own flags and needs no
     // executor config); the spawned daemon blocks until the VMM disconnects.
     #[cfg(feature = "virtiofsd")]
@@ -540,6 +544,17 @@ async fn main() -> ExitCode {
         }
     }
 
+    // The CLI proper runs on a Tokio runtime (formerly `#[tokio::main]`).
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt.block_on(cli_main()),
+        Err(e) => fail(&anyhow::anyhow!("building the async runtime: {e}"), 1),
+    }
+}
+
+async fn cli_main() -> ExitCode {
     let cli = Cli::parse();
     let cfg = match Config::load() {
         Ok(cfg) => cfg,

@@ -1,12 +1,18 @@
 //! The guest kernel and vk-agent, optionally embedded into the `vk` binary.
 //!
 //! The shipped `vk` is self-contained: build.sh compiles it with the `embed`
-//! feature and points build.rs at a freshly built vk-agent and the pinned
-//! vmlinux, which land here as `include_bytes!`. At runtime an asset is resolved
-//! in this order: an explicit --kernel/--agent path, else the embedded copy
-//! (written into the launch's scratch dir), else the on-disk default under
-//! /usr/local/lib/vk. A plain dev `cargo build` embeds nothing, so it just uses
-//! the flags or the on-disk defaults.
+//! feature and points build.rs at a freshly built vk-agent and the pinned vmlinux.
+//! At runtime an asset is resolved in this order: an explicit --kernel/--agent
+//! path, else the embedded copy (written into the launch's scratch dir), else the
+//! on-disk default under /usr/local/lib/vk. A plain dev `cargo build` embeds
+//! nothing, so it just uses the flags or the on-disk defaults.
+//!
+//! The blobs are embedded with the linker (`.incbin` in a `global_asm!` section),
+//! not `include_bytes!`: the linker splices each file straight into `.rodata`, so
+//! rustc/LLVM never materialise the ~24M kernel + ~7M agent as constants — which
+//! otherwise cost significant compile time and peak memory. build.rs supplies the
+//! paths via VK_EMBED_{KERNEL,AGENT}_PATH (an empty placeholder when nothing is
+//! provided, giving a zero-length blob that resolves to "not embedded").
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -42,16 +48,71 @@ impl Asset {
     }
 }
 
+// The two blobs, spliced into `.rodata` by the linker. Each `.incbin` is bracketed
+// by start/end symbols so the runtime can recover the byte range; an empty placeholder
+// file (the no-asset dev build) makes start == end, i.e. a zero-length blob.
+#[cfg(feature = "embed")]
+mod blob {
+    use std::arch::global_asm;
+
+    global_asm!(concat!(
+        ".section .rodata.vk_embed_kernel,\"a\",@progbits\n",
+        ".globl VK_EMBED_KERNEL_START\n",
+        "VK_EMBED_KERNEL_START:\n",
+        ".incbin \"",
+        env!("VK_EMBED_KERNEL_PATH"),
+        "\"\n",
+        ".globl VK_EMBED_KERNEL_END\n",
+        "VK_EMBED_KERNEL_END:\n",
+        ".section .rodata.vk_embed_agent,\"a\",@progbits\n",
+        ".globl VK_EMBED_AGENT_START\n",
+        "VK_EMBED_AGENT_START:\n",
+        ".incbin \"",
+        env!("VK_EMBED_AGENT_PATH"),
+        "\"\n",
+        ".globl VK_EMBED_AGENT_END\n",
+        "VK_EMBED_AGENT_END:\n",
+    ));
+
+    unsafe extern "C" {
+        pub static VK_EMBED_KERNEL_START: u8;
+        pub static VK_EMBED_KERNEL_END: u8;
+        pub static VK_EMBED_AGENT_START: u8;
+        pub static VK_EMBED_AGENT_END: u8;
+    }
+
+    /// The bytes between two linker symbols (`None` if empty). The symbols bound a
+    /// contiguous `.incbin` blob in `.rodata`, so the range is a single static object.
+    fn between(start: *const u8, end: *const u8) -> Option<&'static [u8]> {
+        let len = end as usize - start as usize;
+        // SAFETY: start..end is the linker-placed .incbin blob, valid for the whole
+        // program and never mutated.
+        (len != 0).then(|| unsafe { std::slice::from_raw_parts(start, len) })
+    }
+
+    pub fn kernel() -> Option<&'static [u8]> {
+        between(
+            &raw const VK_EMBED_KERNEL_START,
+            &raw const VK_EMBED_KERNEL_END,
+        )
+    }
+
+    pub fn agent() -> Option<&'static [u8]> {
+        between(
+            &raw const VK_EMBED_AGENT_START,
+            &raw const VK_EMBED_AGENT_END,
+        )
+    }
+}
+
 #[cfg(feature = "embed")]
 fn kernel() -> Option<&'static [u8]> {
-    let b: &[u8] = include_bytes!(env!("VK_EMBED_KERNEL_PATH"));
-    (!b.is_empty()).then_some(b)
+    blob::kernel()
 }
 
 #[cfg(feature = "embed")]
 fn agent() -> Option<&'static [u8]> {
-    let b: &[u8] = include_bytes!(env!("VK_EMBED_AGENT_PATH"));
-    (!b.is_empty()).then_some(b)
+    blob::agent()
 }
 
 #[cfg(not(feature = "embed"))]

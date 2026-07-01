@@ -132,11 +132,15 @@ pub struct VmSpec {
     pub api_socket: Option<PathBuf>,
 }
 
-/// A virtual machine monitor that can boot a [`VmSpec`].
-pub trait Vmm {
+/// A virtual machine monitor that can boot a [`VmSpec`]. `Send` so a boxed `dyn Vmm`
+/// can be held across the async boot-wait loop (the multi-threaded runtime).
+pub trait Vmm: Send {
     /// Build the un-spawned [`Command`] that boots `spec`. Only arguments are set;
     /// the caller owns stdio and spawn/lifecycle semantics.
     fn command(&self, spec: &VmSpec) -> Command;
+
+    /// Backend name, for user-facing log lines.
+    fn name(&self) -> &'static str;
 }
 
 /// cloud-hypervisor: boots `spec` as an external `cloud-hypervisor` process.
@@ -196,6 +200,10 @@ impl Vmm for CloudHypervisor {
         }
         cmd
     }
+
+    fn name(&self) -> &'static str {
+        "cloud-hypervisor"
+    }
 }
 
 /// libkrun: boots `spec` by re-execing `vk __libkrun-boot <spec-json>` — a per-VM
@@ -214,6 +222,10 @@ impl Vmm for Libkrun {
         let mut cmd = Command::new(exe);
         cmd.arg("__libkrun-boot").arg(json);
         cmd
+    }
+
+    fn name(&self) -> &'static str {
+        "libkrun"
     }
 }
 

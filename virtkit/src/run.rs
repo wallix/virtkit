@@ -303,9 +303,12 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
 
     // 3. boot
     let console = work.join("console.log");
+    let (vmm, addr) = select_vmm(&args.cloud_hypervisor, &vsock, VSOCK_PORT);
     println!(
-        "virtkit: booting cloud-hypervisor (cpus={}, mem={})",
-        args.cpus, args.mem
+        "virtkit: booting {} (cpus={}, mem={})",
+        vmm.name(),
+        args.cpus,
+        args.mem
     );
     // exec channel always; the switch and ssh-agent bridges only when set up above.
     let mut vsock_ports = vec![crate::vmm::VsockPort::exec(&vsock, VSOCK_PORT)];
@@ -332,7 +335,7 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
         serial_log: console.clone(),
         api_socket: None,
     };
-    let mut ch = match spawn_ch(&args.cloud_hypervisor, &spec) {
+    let mut ch = match spawn_vmm(vmm.as_ref(), &spec) {
         Ok(ch) => ch,
         // The --net switch and --workdir virtiofsd are already spawned; kill them so a
         // failed boot does not leak host-side children (a leaked `virtkit virtiofsd` would,
@@ -363,10 +366,6 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
     };
     let ssh_config = ssh.and_then(|s| s.guest_config);
 
-    let addr = SocketAddr::VsockMux {
-        path: vsock,
-        port: VSOCK_PORT,
-    };
     let result = drive(
         &mut ch,
         &addr,
@@ -627,19 +626,43 @@ async fn run_shell(addr: &SocketAddr) -> Result<()> {
     Ok(())
 }
 
-fn spawn_ch(cloud_hypervisor: &Path, spec: &crate::vmm::VmSpec) -> Result<Child> {
-    let log = std::fs::File::create(spec.serial_log.with_extension("ch.log"))?;
-    let mut cmd = crate::vmm::CloudHypervisor {
-        bin: cloud_hypervisor.to_path_buf(),
+/// Pick the VMM backend and the matching exec-connect address. Cloud-hypervisor is
+/// the default; `VIRTKIT_VMM=libkrun` selects the libkrun backend when it is compiled
+/// in (the `libkrun` feature). libkrun listens for the exec channel on `exec_sock`
+/// itself and forwards raw to the guest, so the host connects with a plain unix
+/// socket — no hybrid-vsock `CONNECT`.
+fn select_vmm(
+    cloud_hypervisor: &Path,
+    exec_sock: &Path,
+    exec_port: u32,
+) -> (Box<dyn Vmm>, SocketAddr) {
+    #[cfg(feature = "libkrun")]
+    if std::env::var_os("VIRTKIT_VMM").is_some_and(|v| v == "libkrun") {
+        return (
+            Box::new(crate::vmm::Libkrun),
+            SocketAddr::Unix(exec_sock.to_path_buf()),
+        );
     }
-    .command(spec);
+    (
+        Box::new(crate::vmm::CloudHypervisor {
+            bin: cloud_hypervisor.to_path_buf(),
+        }),
+        SocketAddr::VsockMux {
+            path: exec_sock.to_path_buf(),
+            port: exec_port,
+        },
+    )
+}
+
+fn spawn_vmm(vmm: &dyn Vmm, spec: &crate::vmm::VmSpec) -> Result<Child> {
+    let log = std::fs::File::create(spec.serial_log.with_extension("vmm.log"))?;
+    let mut cmd = vmm.command(spec);
     cmd.stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
-    // Self-reap the VM if virtkit dies before teardown — a leaked cloud-hypervisor is a
-    // whole running guest, not just an idle helper (spawn_tied).
-    crate::fleet::spawn_tied(cmd)
-        .with_context(|| format!("spawning {}", cloud_hypervisor.display()))
+    // Self-reap the VM if virtkit dies before teardown — a leaked VMM is a whole
+    // running guest, not just an idle helper (spawn_tied).
+    crate::fleet::spawn_tied(cmd).context("spawning the VMM")
 }
 
 fn tail(path: &Path, lines: usize) -> String {
@@ -822,11 +845,8 @@ pub(crate) async fn boot_session(
         serial_log: console.clone(),
         api_socket: None,
     };
-    let mut ch = spawn_ch(cloud_hypervisor, &spec)?;
-    let addr = SocketAddr::VsockMux {
-        path: vsock,
-        port: VSOCK_PORT,
-    };
+    let (vmm, addr) = select_vmm(cloud_hypervisor, &vsock, VSOCK_PORT);
+    let mut ch = spawn_vmm(vmm.as_ref(), &spec)?;
     let deadline = Instant::now() + Duration::from_secs(boot_timeout_secs);
     loop {
         if let Some(status) = ch.try_wait()? {

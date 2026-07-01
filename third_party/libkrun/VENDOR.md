@@ -12,7 +12,15 @@ crate depends on `src/libkrun` (package `libkrun`, lib name `krun`) as a path
 dependency, so it shares virtkit's `std` — avoiding the double-std / broken-unwinding
 that a static `libkrun.a` link hits.
 
-## Local patch
+## Local patches
+
+`src/libkrun/Cargo.toml` + `src/libkrun/build.rs` — dropped `cdylib` from the crate's
+`crate-type` (now just `lib`). virtkit links the crate as an rlib path dependency; the
+upstream `cdylib` (`libkrun.so`, for C consumers) is never built and is unsupported on
+the static-PIE musl target, so cargo emitted a "dropping unsupported crate type
+`cdylib`" warning on every build. The build script did nothing but set the
+`libkrun.so`/`.dylib` soname via `cargo:rustc-cdylib-link-arg` (itself warned about
+with no cdylib target), so it is now a no-op.
 
 `src/devices/src/virtio/fs/linux/passthrough.rs` — the passthrough fs device called
 `libc::statx` with `libc::STATX_BASIC_STATS | libc::STATX_MNT_ID`. libc dropped its

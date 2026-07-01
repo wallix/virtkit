@@ -51,4 +51,6 @@ vm-memory = { version = "0.17", features = ["backend-mmap"] }
 
 [lib]
 name = "krun"
-crate-type = ["cdylib", "lib"]
+# virtkit links this as an rlib (path dep); the upstream `cdylib` (libkrun.so) is
+# unused and unsupported on the static-PIE musl target. See VENDOR.md.
+crate-type = ["lib"]

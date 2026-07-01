@@ -103,14 +103,14 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         // root (virtio-blk + ext4 built into the pinned kernel) and serves the exec
         // channel directly — no systemd.
         (true, Media::Disk { .. }) => format!(
-            "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/virtkit-agent \
+            "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/vk-agent \
              VIRTKIT_HOSTNAME={} VIRTKIT_VSOCK_PORT={}",
             cfg.vm.hostname, cfg.vm.vsock_port
         ),
         // generic cpio guest: virtkit-agent is PID 1 in the initramfs (no disk root)
         // and serves directly.
         (true, Media::Initramfs { .. }) => format!(
-            "console=ttyS0 rdinit=/usr/local/bin/virtkit-agent VIRTKIT_HOSTNAME={} \
+            "console=ttyS0 rdinit=/usr/local/bin/vk-agent VIRTKIT_HOSTNAME={} \
              VIRTKIT_VSOCK_PORT={}",
             cfg.vm.hostname, cfg.vm.vsock_port
         ),
@@ -118,7 +118,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         // entrypoint (VIRTKIT_MODE=service) which brings up systemd; the in-guest
         // serve agent then runs as a systemd unit.
         (false, _) => format!(
-            "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/virtkit-agent \
+            "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/vk-agent \
              VIRTKIT_MODE=service VIRTKIT_HOSTNAME={}",
             cfg.vm.hostname
         ),
@@ -348,7 +348,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
                 ctx.ch_log().display()
             );
         }
-        match virtkit_agent::status::get_status(&addr).await {
+        match vk_agent::status::get_status(&addr).await {
             Ok(status) => {
                 // Fail fast on a wire-protocol skew (the guest bundle's virtkit-agent
                 // predates this virtkit, or vice versa): rmp_serde structs are
@@ -356,7 +356,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
                 // commands and would otherwise drop the connection mid-command with
                 // an opaque "connection to the VM lost". A pre-versioning virtkit-agent
                 // reports protocol 0.
-                let want = virtkit_agent::messages::PROTOCOL_VERSION;
+                let want = vk_agent::messages::PROTOCOL_VERSION;
                 if status.protocol() != want {
                     bail!(
                         "guest virtkit-agent wire protocol v{} != virtkit v{want} — the guest \

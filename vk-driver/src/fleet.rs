@@ -4,7 +4,7 @@
 //! (`--vm`) shares /workdir + the git worktree over virtiofs and DHCPs an
 //! address; declared services (`--service`) get static *.lan addresses.
 //!
-//! Both boot init=/usr/local/bin/virtkit-agent (the agent's init modes). Each
+//! Both boot init=/usr/local/bin/vk-agent (the agent's init modes). Each
 //! service: a throwaway CoW overlay over its ext4, the agent execs the image's
 //! captured entrypoint (VIRTKIT_MODE=service) on a static *.lan address. The
 //! VM: a CoW overlay (keyed on the base fs UUID), the agent serves vsock +
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use virtkit_agent::fleetctl::{Reply, Request, UnitStatus};
+use vk_agent::fleetctl::{Reply, Request, UnitStatus};
 
 use crate::vmm::Vmm;
 
@@ -269,10 +269,9 @@ pub async fn run(
     // Control server on the VM's hybrid-vsock control socket — only the VM
     // can reach it, so the control plane is scoped to the dev VM by construction.
     if let Some(b) = &vm {
-        let ctrl = b.dir().join(format!(
-            "vsock.sock_{}",
-            virtkit_agent::fleetctl::CONTROL_PORT
-        ));
+        let ctrl = b
+            .dir()
+            .join(format!("vsock.sock_{}", vk_agent::fleetctl::CONTROL_PORT));
         let mgr = mgr.clone();
         tokio::spawn(async move {
             if let Err(e) = control_server(&ctrl, mgr).await {
@@ -496,9 +495,9 @@ async fn control_server(listen: &Path, mgr: Arc<Manager>) -> Result<()> {
 async fn handle_control(conn: tokio::net::UnixStream, mgr: Arc<Manager>) -> Result<()> {
     let (rd, mut wr) = conn.into_split();
     let mut rd = tokio::io::BufReader::new(rd);
-    let req: Request = virtkit_agent::fleetctl::read_msg(&mut rd).await?;
+    let req: Request = vk_agent::fleetctl::read_msg(&mut rd).await?;
     let reply = mgr.handle(req); // sync; the unit lock is never held across an await
-    virtkit_agent::fleetctl::write_msg(&mut wr, &reply).await?;
+    vk_agent::fleetctl::write_msg(&mut wr, &reply).await?;
     Ok(())
 }
 
@@ -570,7 +569,7 @@ fn boot_service(
     // Static address + the gateway as resolver (its DNS answers *.lan and forwards
     // the rest), so the unit resolves fleet names without an /etc/hosts injection.
     let mut cmdline = format!(
-        "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/virtkit-agent \
+        "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/vk-agent \
          VIRTKIT_MODE=service VIRTKIT_HOSTNAME={} VIRTKIT_NET_PORT={net_port} \
          VIRTKIT_VM_IP={} VIRTKIT_VM_DNS={gateway}",
         svc.name, svc.ip
@@ -741,7 +740,7 @@ fn boot_vm(
     };
 
     let cmdline = format!(
-        "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/virtkit-agent \
+        "console=ttyS0 root=/dev/vda rw rootfstype=ext4 init=/usr/local/bin/vk-agent \
          VIRTKIT_HOSTNAME={} VIRTKIT_NET_PORT={net_port} VIRTKIT_NET_DHCP=1 \
          VIRTKIT_VIRTIOFS={virtiofs} VIRTKIT_SSH=1{symlinks_param}{ssh_keys_param}",
         b.name

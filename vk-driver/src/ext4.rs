@@ -119,7 +119,7 @@ pub struct FsId {
 /// Build an ext4 image at `out` from the rootfs `tar_path`, injecting the static
 /// agent (PID 1). Convenience wrapper over [`build_from_tar_injecting`].
 pub fn build_from_tar(tar_path: &Path, agent: &Path, out: &Path) -> Result<()> {
-    let inj = [("usr/local/bin/virtkit-agent", agent, 0o755)];
+    let inj = [("usr/local/bin/vk-agent", agent, 0o755)];
     build_from_tar_injecting(
         tar_path,
         &inj,
@@ -2038,7 +2038,7 @@ mod tests {
             uuid: Some([0x42u8; 16]),
             ..Default::default()
         };
-        let inj = [("usr/local/bin/virtkit-agent", agent.as_path(), 0o755u16)];
+        let inj = [("usr/local/bin/vk-agent", agent.as_path(), 0o755u16)];
         build_from_tar_injecting(&tar_path, &inj, 0, &fsid, &img)
             .expect("build_from_tar_injecting");
 

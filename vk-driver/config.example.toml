@@ -57,8 +57,8 @@
 
 # [build]                # defaults for `virtkit build` (a CLI flag always overrides).
 # cloud_hypervisor = "/usr/local/bin/cloud-hypervisor"  # default: top-level cloud_hypervisor
-# kernel = "/usr/local/lib/virtkit/vmlinux"             # build guest kernel
-# agent = "/usr/local/lib/virtkit/virtkit-agent"        # injected as PID 1
+# kernel = "/usr/local/lib/vk/vmlinux"             # build guest kernel
+# agent = "/usr/local/lib/vk/vk-agent"        # injected as PID 1
 # cache_registry = "127.0.0.1:5000"                     # shared instruction cache
 # cache_insecure = true                                 # the cache registry is plain HTTP
 # journal = false                                       # add an ext4 journal to the export
@@ -71,8 +71,8 @@
 # [local]                # local guest bundles on the host filesystem. Each
 #                        # <dir>/<name>/ is a baked bundle (runner.ext4 + boot.kind
 #                        # [+ vmlinuz + initrd.img]). Backs the local/<name> form.
-# dir = "/usr/local/lib/virtkit/images"   # default: <state_dir>/images
-# generic_kernel = "/usr/local/lib/virtkit/vmlinux"  # shared kernel for
+# dir = "/usr/local/lib/vk/images"   # default: <state_dir>/images
+# generic_kernel = "/usr/local/lib/vk/vmlinux"  # shared kernel for
 #                                  # generic (kernel-less) bundles
 
 # [registry]             # native OCI bundle registry: push/pull guest bundles with
@@ -85,7 +85,7 @@
 #                                  # (kept out of this config); read at runtime,
 #                                  # provision it 0600. Sent over TLS — see ca_file.
 # insecure = false                 # plain HTTP (a local/insecure registry)
-# generic_kernel = "/usr/local/lib/virtkit/vmlinux"  # shared kernel for
+# generic_kernel = "/usr/local/lib/vk/vmlinux"  # shared kernel for
 #                                  # generic (kernel-less) bundles
 # keep = 3                         # cached pulled bundles per image (GC)
 
@@ -93,9 +93,9 @@
 #                        # is `docker/<name>[:tag|@digest]`.
 # repo = "registry.example.com/team"   # fixed host-side = the image allowlist
 # docker = "/usr/bin/docker"       # host daemon: pull + the root conversion container
-# agent = "/usr/local/lib/virtkit/virtkit-agent"  # the agent, injected as PID 1
+# agent = "/usr/local/lib/vk/vk-agent"  # the agent, injected as PID 1
 # rootfs_size = "32G"              # ext4 size of the converted rootfs (sparse)
-# generic_kernel = "/usr/local/lib/virtkit/vmlinux"  # shared kernel for
+# generic_kernel = "/usr/local/lib/vk/vmlinux"  # shared kernel for
 #                                  # kernel-less OCI images (alpine/distroless)
 # generic_disk = false             # generic images: ext4 disk (true) vs cpio in RAM
 # oras = "/usr/local/bin/oras"     # tag → digest resolution

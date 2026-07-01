@@ -649,7 +649,7 @@ fn kv(kvs: &[(String, String)], sep: char) -> String {
 /// trailing-segment glob (`dir/*.json`). Unreadable/absent sources contribute a marker.
 fn context_copy_hash(context: &Path, copy: &parser::Copy) -> String {
     use sha2::{Digest, Sha256};
-    let ign = virtkit_agent::diskmount::Ignore::load(context);
+    let ign = vk_agent::diskmount::Ignore::load(context);
     let mut files: Vec<PathBuf> = Vec::new();
     for src in &copy.sources {
         files.extend(copy_src_files(context, &ign, src));
@@ -674,7 +674,7 @@ fn context_copy_hash(context: &Path, copy: &parser::Copy) -> String {
 /// literal file/dir (recursed), else a trailing-segment glob matched against its dir.
 fn copy_src_files(
     context: &Path,
-    ign: &virtkit_agent::diskmount::Ignore,
+    ign: &vk_agent::diskmount::Ignore,
     src: &str,
 ) -> Vec<PathBuf> {
     let rel = src.trim_start_matches('/');

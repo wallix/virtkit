@@ -4,7 +4,7 @@
 //! own entrypoint (`VIRTKIT_MODE=service`).
 //!
 //! Configuration comes from the kernel cmdline (the executor passes it; a guest
-//! booted `init=/usr/local/bin/virtkit-agent` gets no usable argv) and from capture
+//! booted `init=/usr/local/bin/vk-agent` gets no usable argv) and from capture
 //! files written at image-build time:
 //!   /etc/virtkit/env    image ENV (KEY=VALUE per line; lost by `docker export`)
 //!   /etc/virtkit/user   image USER: exported as VIRTKIT_DEFAULT_RUN_USER so served

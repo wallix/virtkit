@@ -249,13 +249,13 @@ fn default_docker() -> PathBuf {
     "docker".into()
 }
 fn default_host_agent() -> PathBuf {
-    "/usr/local/lib/virtkit/virtkit-agent".into()
+    "/usr/local/lib/vk/vk-agent".into()
 }
 fn default_rootfs_size() -> String {
     "32G".into()
 }
 fn default_generic_kernel() -> PathBuf {
-    "/usr/local/lib/virtkit/vmlinux".into()
+    "/usr/local/lib/vk/vmlinux".into()
 }
 
 fn default_oras() -> PathBuf {
@@ -478,13 +478,13 @@ mod tests {
         let cfg: Config = toml::from_str(
             r#"
             [gitlab]
-            dir = "/usr/local/lib/virtkit/ci-tools"
+            dir = "/usr/local/lib/vk/ci-tools"
             "#,
         )
         .unwrap();
         assert_eq!(
             cfg.gitlab.as_ref().unwrap().dir.as_deref(),
-            Some(Path::new("/usr/local/lib/virtkit/ci-tools"))
+            Some(Path::new("/usr/local/lib/vk/ci-tools"))
         );
     }
 

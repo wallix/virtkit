@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use crate::cpio::CpioWriter;
 
 /// Where the injected agent lands in the rootfs (relative path).
-pub const CMDRUNNER_PATH: &str = "usr/local/bin/virtkit-agent";
+pub const CMDRUNNER_PATH: &str = "usr/local/bin/vk-agent";
 
 /// Build a cpio initramfs at `out` from the rootfs `tar_path`, injecting the
 /// static agent as PID 1. Convenience wrapper over [`build_initramfs_injecting`].

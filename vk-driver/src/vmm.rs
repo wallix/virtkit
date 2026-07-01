@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use virtkit_agent::addr::SocketAddr;
+use vk_agent::addr::SocketAddr;
 
 /// A virtio-blk disk, attached in order (first = `/dev/vda`, then `vdb`, …).
 #[derive(serde::Serialize, serde::Deserialize)]

@@ -39,7 +39,7 @@ mkdir -p /stage
 tar -C / --one-file-system \
     --exclude=./out --exclude=./stage --exclude=./agent \
     -cf - . | tar -C /stage -xpf -
-install -m 0755 /agent /stage/usr/local/bin/virtkit-agent
+install -m 0755 /agent /stage/usr/local/bin/vk-agent
 mkdir -p /stage/etc/virtkit
 install -m 0644 /out/virtkit.env /stage/etc/virtkit/env
 install -m 0644 /out/virtkit.user /stage/etc/virtkit/user
@@ -250,7 +250,7 @@ fn assemble_generic(cv: &Convert, img: &str, tmp: &Path, disk: bool) -> Result<(
     write_env_file(cv, img, &env_file)?;
     write_user_file(cv, img, &user_file)?;
     let injects: [(&str, &Path, u16); 3] = [
-        ("usr/local/bin/virtkit-agent", cv.agent.as_path(), 0o755),
+        ("usr/local/bin/vk-agent", cv.agent.as_path(), 0o755),
         ("etc/virtkit/env", env_file.as_path(), 0o644),
         ("etc/virtkit/user", user_file.as_path(), 0o644),
     ];

@@ -124,7 +124,7 @@ pub fn setup_script(cfg: &ServicesCfg, services: &[Service]) -> String {
     // teardown reaps it). 127.0.0.1 is auto-insecure in docker, so no daemon
     // config is needed for the rewritten refs.
     s.push_str(&format!(
-        "setsid /usr/local/bin/virtkit-agent --socket vsock://{port} forward \
+        "setsid /usr/local/bin/vk-agent --socket vsock://{port} forward \
          --listen tcp://127.0.0.1:{port} </dev/null >/var/log/ci-services-forward.log 2>&1 &\n",
         port = cfg.port,
     ));

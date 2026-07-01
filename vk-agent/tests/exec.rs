@@ -7,12 +7,12 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::time::timeout;
-use virtkit_agent::addr::SocketAddr;
-use virtkit_agent::exec::server::run_server;
-use virtkit_agent::framing::wrap_stream;
-use virtkit_agent::messages::{CmdExec, Fd, Message, RunMode, Status, Tty};
-use virtkit_agent::net::connect;
-use virtkit_agent::status::get_status;
+use vk_agent::addr::SocketAddr;
+use vk_agent::exec::server::run_server;
+use vk_agent::framing::wrap_stream;
+use vk_agent::messages::{CmdExec, Fd, Message, RunMode, Status, Tty};
+use vk_agent::net::connect;
+use vk_agent::status::get_status;
 
 fn tmp_socket_path(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(

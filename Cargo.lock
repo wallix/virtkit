@@ -4261,7 +4261,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "virtkit"
+name = "virtue"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
+
+[[package]]
+name = "vk-agent"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "jemallocator",
+ "libc",
+ "listenfd",
+ "log",
+ "rand 0.10.1",
+ "rmp-serde",
+ "russh",
+ "russh-sftp",
+ "serde",
+ "serde_json",
+ "simplelog",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "tokio-vsock",
+]
+
+[[package]]
+name = "vk-driver"
 version = "0.3.0"
 dependencies = [
  "anyhow",
@@ -4289,41 +4320,10 @@ dependencies = [
  "vhost",
  "vhost-user-backend",
  "virtiofsd",
- "virtkit-agent",
+ "vk-agent",
  "vm-memory 0.16.2",
  "zstd",
 ]
-
-[[package]]
-name = "virtkit-agent"
-version = "0.3.0"
-dependencies = [
- "anyhow",
- "clap",
- "futures",
- "jemallocator",
- "libc",
- "listenfd",
- "log",
- "rand 0.10.1",
- "rmp-serde",
- "russh",
- "russh-sftp",
- "serde",
- "serde_json",
- "simplelog",
- "thiserror 2.0.18",
- "tokio",
- "tokio-serde",
- "tokio-util",
- "tokio-vsock",
-]
-
-[[package]]
-name = "virtue"
-version = "0.0.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "vm-fdt"

@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use virtkit_agent::addr::SocketAddr;
+use vk_agent::addr::SocketAddr;
 
 use crate::source::Source;
 use crate::vmm::Vmm;
@@ -238,7 +238,7 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
                 None,
                 format!(
                     "console=ttyS0 root=/dev/vda rw rootfstype=ext4 \
-                     init=/usr/local/bin/virtkit-agent \
+                     init=/usr/local/bin/vk-agent \
                      VIRTKIT_HOSTNAME=vm VIRTKIT_VSOCK_PORT={VSOCK_PORT}"
                 ),
             )
@@ -250,7 +250,7 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
                 Vec::new(),
                 Some(cpio),
                 format!(
-                    "console=ttyS0 rdinit=/usr/local/bin/virtkit-agent VIRTKIT_HOSTNAME=vm \
+                    "console=ttyS0 rdinit=/usr/local/bin/vk-agent VIRTKIT_HOSTNAME=vm \
                      VIRTKIT_VSOCK_PORT={VSOCK_PORT}"
                 ),
             )
@@ -528,7 +528,7 @@ async fn drive(
                 tail(console, 20)
             );
         }
-        if virtkit_agent::status::get_status(addr).await.is_ok() {
+        if vk_agent::status::get_status(addr).await.is_ok() {
             break;
         }
         if Instant::now() >= deadline {
@@ -608,9 +608,9 @@ async fn write_guest_ssh_config(addr: &SocketAddr, config: &str) -> Result<()> {
 /// terminal (raw mode), sized to it. Returns when the shell exits, whatever its
 /// status — a shell that quits non-zero is not a launch failure.
 async fn run_shell(addr: &SocketAddr) -> Result<()> {
-    use virtkit_agent::messages::{CmdExec, RunMode, Tty};
-    let (rows, cols) = virtkit_agent::pty::get_winsize(0).unwrap_or((24, 80));
-    let (stream, sink) = virtkit_agent::net::connect(addr)
+    use vk_agent::messages::{CmdExec, RunMode, Tty};
+    let (rows, cols) = vk_agent::pty::get_winsize(0).unwrap_or((24, 80));
+    let (stream, sink) = vk_agent::net::connect(addr)
         .await
         .context("connecting to the VM's virtkit-agent")?;
     let exec = CmdExec {
@@ -627,7 +627,7 @@ async fn run_shell(addr: &SocketAddr) -> Result<()> {
         }),
         user: None,
     };
-    virtkit_agent::exec::client::client_run_tty(stream, sink, exec)
+    vk_agent::exec::client::client_run_tty(stream, sink, exec)
         .await
         .context("interactive guest shell")?;
     Ok(())
@@ -839,7 +839,7 @@ pub(crate) async fn boot_session(
                 tail(&console, 20)
             );
         }
-        if virtkit_agent::status::get_status(&addr).await.is_ok() {
+        if vk_agent::status::get_status(&addr).await.is_ok() {
             break;
         }
         if Instant::now() >= deadline {
@@ -999,7 +999,7 @@ mod tests {
             .await
             .expect("boot_session");
             let mount = [
-                "/usr/local/bin/virtkit-agent".to_string(),
+                "/usr/local/bin/vk-agent".to_string(),
                 "mount".into(),
                 "--ro".into(),
                 "/dev/vdb".into(),

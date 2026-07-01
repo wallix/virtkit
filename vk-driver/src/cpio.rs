@@ -144,7 +144,7 @@ mod tests {
     fn dirs_for_builds_the_chain() {
         let mut buf = Vec::new();
         let mut c = CpioWriter::new(&mut buf);
-        c.dirs_for("usr/local/bin/virtkit-agent", 0o755).unwrap();
+        c.dirs_for("usr/local/bin/vk-agent", 0o755).unwrap();
         c.finish().unwrap();
         let s = String::from_utf8_lossy(&buf);
         for d in ["usr", "usr/local", "usr/local/bin"] {

@@ -52,7 +52,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use virtkit_agent::addr::SocketAddr;
+use vk_agent::addr::SocketAddr;
 
 use crate::config::Config;
 use crate::jobctx::JobCtx;
@@ -253,7 +253,7 @@ enum Cmd {
         /// fleet host map for /etc/hosts (name=ip,...), passed to the guests
         #[arg(long)]
         hosts: Option<String>,
-        #[arg(long, default_value = "/usr/local/lib/virtkit/vmlinux")]
+        #[arg(long, default_value = "/usr/local/lib/vk/vmlinux")]
         kernel: PathBuf,
         #[arg(long, default_value = "cloud-hypervisor")]
         cloud_hypervisor: PathBuf,
@@ -348,7 +348,7 @@ enum Cmd {
         #[arg(long, value_name = "DIR")]
         workdir: Option<PathBuf>,
         /// Pinned guest kernel (the pinned vmlinux: virtio + ext4 built in)
-        #[arg(long, default_value = "/usr/local/lib/virtkit/vmlinux")]
+        #[arg(long, default_value = "/usr/local/lib/vk/vmlinux")]
         kernel: PathBuf,
         /// Where the rootfs comes from: oci (registry pull, no docker daemon), docker
         /// (docker export), or auto (registry, falling back to docker for an unpushed image)
@@ -365,7 +365,7 @@ enum Cmd {
         #[arg(long)]
         insecure: bool,
         /// Static (musl) virtkit-agent injected as PID 1
-        #[arg(long = "agent", default_value = "/usr/local/lib/virtkit/virtkit-agent")]
+        #[arg(long = "agent", default_value = "/usr/local/lib/vk/vk-agent")]
         agent: PathBuf,
         /// cloud-hypervisor binary
         #[arg(long, default_value = "cloud-hypervisor")]
@@ -1086,7 +1086,7 @@ async fn main() -> ExitCode {
         // run_forward only returns on a bind error; otherwise it serves until the
         // process is killed (cleanup tears the detached child down).
         Cmd::Forward { listen, to } => {
-            match virtkit_agent::forward::run_forward(&listen, &to).await {
+            match vk_agent::forward::run_forward(&listen, &to).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => fail(&e, 1),
             }

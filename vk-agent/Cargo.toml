@@ -1,5 +1,5 @@
 [package]
-name = "virtkit-agent"
+name = "vk-agent"
 version.workspace = true
 edition.workspace = true
 

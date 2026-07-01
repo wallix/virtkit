@@ -74,9 +74,9 @@ BUILD_ENV=(
 
 if [ -n "$USE_VIRTKIT" ]; then
   # ---- dogfood backend: virtkit builds the env image + compiles in a microVM ----
-  VK="$USE_VIRTKIT/virtkit"
+  VK="$USE_VIRTKIT/vk-driver"
   KERNEL="$USE_VIRTKIT/vmlinux"
-  AGENT="$USE_VIRTKIT/virtkit-agent"
+  AGENT="$USE_VIRTKIT/vk-agent"
   for f in "$VK" "$KERNEL" "$AGENT"; do
     [ -e "$f" ] || { echo "missing $f (need a populated --use-virtkit dir)" >&2; exit 1; }
   done
@@ -130,40 +130,40 @@ mkdir -p "$OUT"
 # Replace atomically (write a temp, then rename): a plain cp truncates the destination and
 # would fail "Text file busy" if the old $OUT/virtkit is still being executed (e.g. by a
 # previous --use-virtkit / --bootstrap-check run); rename never does.
-for b in virtkit virtkit-agent; do
+for b in vk-driver vk-agent; do
   cp "target/$TARGET/release/$b" "$OUT/.$b.tmp"
   mv -f "$OUT/.$b.tmp" "$OUT/$b"
 done
 
 # Reproducibility manifest: the pinned inputs and the artifact hashes. Anyone can
 # rebuild from the same commit + inputs and confirm byte-for-byte:
-#   git checkout <git_commit> && ./build.sh && sha256sum -c dist/virtkit.sha256 dist/virtkit-agent.sha256
-( cd "$OUT" && sha256sum virtkit > virtkit.sha256 && sha256sum virtkit-agent > virtkit-agent.sha256 )
+#   git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk-driver.sha256 dist/vk-agent.sha256
+( cd "$OUT" && sha256sum vk-driver > vk-driver.sha256 && sha256sum vk-agent > vk-agent.sha256 )
 base_image=$(sed -nE 's/^FROM (rust:.*)$/\1/p' .devcontainer/Dockerfile)
 toolchain=$(sed -nE 's/^channel = "(.*)"$/\1/p' rust-toolchain.toml)
 commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 [ -n "$(git status --porcelain 2>/dev/null)" ] && commit="$commit (dirty)"
 cat > "$OUT/build-info.txt" <<EOF
 # virtkit reproducible build manifest
-# Verify: git checkout <git_commit> && ./build.sh && sha256sum -c dist/virtkit.sha256 dist/virtkit-agent.sha256
+# Verify: git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk-driver.sha256 dist/vk-agent.sha256
 git_commit:      ${commit}
 rust_toolchain:  ${toolchain}
 base_image:      ${base_image}
 
-$(cat "$OUT/virtkit.sha256")
-$(cat "$OUT/virtkit-agent.sha256")
+$(cat "$OUT/vk-driver.sha256")
+$(cat "$OUT/vk-agent.sha256")
 EOF
 
 echo
 echo "built into $OUT/:"
-file "$OUT/virtkit" "$OUT/virtkit-agent"
+file "$OUT/vk-driver" "$OUT/vk-agent"
 echo
 cat "$OUT/build-info.txt"
 
 if [ -n "$BOOTSTRAP_CHECK" ]; then
   # Rebuild with the virtkit we just produced (the dogfood backend) and confirm it
   # reproduces the Docker build bit-for-bit. The just-built $OUT is itself a valid
-  # --use-virtkit toolchain (virtkit + virtkit-agent built above, vmlinux from
+  # --use-virtkit toolchain (vk-driver + vk-agent built above, vmlinux from
   # build-kernel.sh). The second build runs on a clean copy of the tree in a tmp dir —
   # a full independent compile, mounted at the same /work path so the container-side
   # paths (and thus the reproducible bytes) match the Docker build.
@@ -180,7 +180,7 @@ if [ -n "$BOOTSTRAP_CHECK" ]; then
   echo
   echo "bootstrap check: comparing sha256…"
   mismatch=""
-  for b in virtkit virtkit-agent; do
+  for b in vk-driver vk-agent; do
     docker_sha=$(sha256sum < "$OUT/$b" | cut -d' ' -f1)
     virtkit_sha=$(sha256sum < "$boot_tmp/$OUT/$b" | cut -d' ' -f1)
     if [ "$docker_sha" = "$virtkit_sha" ]; then

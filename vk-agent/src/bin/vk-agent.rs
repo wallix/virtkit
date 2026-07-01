@@ -9,16 +9,16 @@ use std::fs::File;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Duration;
-use virtkit_agent::addr::SocketAddr;
-use virtkit_agent::exec::client::{client_run_cmd, client_run_tty};
-use virtkit_agent::exec::server::run_server;
-use virtkit_agent::messages::RunMode;
-use virtkit_agent::messages::{CmdExec, CmdResult, Tty};
-use virtkit_agent::net::connect;
-use virtkit_agent::status::get_status;
+use vk_agent::addr::SocketAddr;
+use vk_agent::exec::client::{client_run_cmd, client_run_tty};
+use vk_agent::exec::server::run_server;
+use vk_agent::messages::RunMode;
+use vk_agent::messages::{CmdExec, CmdResult, Tty};
+use vk_agent::net::connect;
+use vk_agent::status::get_status;
 
 #[derive(Debug, Parser)] // requires `derive` feature
-#[command(name = "virtkit-agent", version)]
+#[command(name = "vk-agent", version)]
 #[command(about = "send / execute commands through unix or vsock sockets", long_about = None)]
 struct Cli {
     /// Socket address: a unix socket path, systemd:// (socket activation, serve
@@ -154,7 +154,7 @@ fn main() {
             .enable_all()
             .build()
             .expect("building the tokio runtime");
-        if let Err(e) = rt.block_on(virtkit_agent::fleetctl::run_client(&args)) {
+        if let Err(e) = rt.block_on(vk_agent::fleetctl::run_client(&args)) {
             eprintln!("virtctl: {e:#}");
             std::process::exit(1);
         }
@@ -167,7 +167,7 @@ fn main() {
     let mut argv = std::env::args();
     if argv.nth(1).as_deref() == Some("fsfreeze") {
         let rest: Vec<String> = std::env::args().skip(2).collect();
-        std::process::exit(virtkit_agent::fsfreeze::main(&rest));
+        std::process::exit(vk_agent::fsfreeze::main(&rest));
     }
     // Local block-device mount/unmount (no socket): the host attaches a source stage's
     // ext4 read-only and runs `virtkit-agent mount|umount …` in the guest to read it.
@@ -176,14 +176,14 @@ fn main() {
         Some("mount") | Some("umount") | Some("copy") | Some("cleanup")
     ) {
         let rest: Vec<String> = std::env::args().skip(1).collect();
-        std::process::exit(virtkit_agent::diskmount::main(&rest));
+        std::process::exit(vk_agent::diskmount::main(&rest));
     }
-    // PID 1: the guest was booted `init=/usr/local/bin/virtkit-agent` (a systemd-less
+    // PID 1: the guest was booted `init=/usr/local/bin/vk-agent` (a systemd-less
     // image). The kernel/initramfs passes no usable argv, so bypass clap entirely
     // and derive the vsock socket from the kernel cmdline. Equivalent to the
     // explicit `init` subcommand below, minus the argument plumbing.
     if std::process::id() == 1 {
-        init_main(virtkit_agent::init::socket_from_cmdline(), None);
+        init_main(vk_agent::init::socket_from_cmdline(), None);
         return;
     }
     let cli_args = Cli::parse();
@@ -214,7 +214,7 @@ fn init_main(socket: SocketAddr, inactivity_timeout: Option<u64>) {
     )
     .ok();
     let timeout = inactivity_timeout.filter(|t| *t > 0);
-    if let Err(e) = virtkit_agent::init::run_init(&socket, timeout) {
+    if let Err(e) = vk_agent::init::run_init(&socket, timeout) {
         error!("init: {e:#}");
         std::process::exit(1);
     }
@@ -260,7 +260,7 @@ async fn async_main(socket: SocketAddr, command: Commands) {
                     std::process::exit(2);
                 }
                 // (0, 0) = terminal that does not report a size: pick a sane default
-                let (rows, cols) = match virtkit_agent::pty::get_winsize(0) {
+                let (rows, cols) = match vk_agent::pty::get_winsize(0) {
                     Ok((0, 0)) | Err(_) => (24, 80),
                     Ok(size) => size,
                 };
@@ -347,7 +347,7 @@ async fn async_main(socket: SocketAddr, command: Commands) {
                 },
             )
             .unwrap();
-            if let Err(e) = virtkit_agent::forward::run_forward(&listen, &socket).await {
+            if let Err(e) = vk_agent::forward::run_forward(&listen, &socket).await {
                 error!("forward: {e:#}");
                 std::process::exit(1)
             }
@@ -356,7 +356,7 @@ async fn async_main(socket: SocketAddr, command: Commands) {
             // stdout carries the raw SSH byte stream — never init a logger on it.
             // Errors go to stderr, which ssh surfaces to the user as ProxyCommand
             // output.
-            if let Err(e) = virtkit_agent::forward::run_connect(&socket).await {
+            if let Err(e) = vk_agent::forward::run_connect(&socket).await {
                 eprintln!("connect: {e:#}");
                 std::process::exit(1)
             }
@@ -373,7 +373,7 @@ async fn async_main(socket: SocketAddr, command: Commands) {
                 },
             )
             .unwrap();
-            if let Err(e) = virtkit_agent::tap::run_net(&socket, &iface).await {
+            if let Err(e) = vk_agent::tap::run_net(&socket, &iface).await {
                 error!("net: {e:#}");
                 std::process::exit(1)
             }
@@ -394,8 +394,8 @@ async fn async_main(socket: SocketAddr, command: Commands) {
                 },
             )
             .unwrap();
-            let keys = virtkit_agent::ssh::parse_authorized_keys(authorized_keys.as_slice());
-            if let Err(e) = virtkit_agent::ssh::run_ssh_server(&socket, &keys, user).await {
+            let keys = vk_agent::ssh::parse_authorized_keys(authorized_keys.as_slice());
+            if let Err(e) = vk_agent::ssh::run_ssh_server(&socket, &keys, user).await {
                 error!("ssh-serve: {e:#}");
                 std::process::exit(1)
             }

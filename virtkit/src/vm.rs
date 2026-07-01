@@ -272,6 +272,24 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
     };
 
     // shared=on (set via shared_mem): required by virtio-fs, harmless without.
+    // vsock ports the guest uses: the exec channel always, plus the switch bridge in
+    // `switch` net mode (guest egress over the userspace switch) and the ssh-agent
+    // bridge when agent forwarding is on. Tap/pool networking uses a virtio-net device,
+    // not vsock. Only the libkrun backend consumes this; cloud-hypervisor derives it.
+    let mut vsock_ports = vec![crate::vmm::VsockPort::exec(&ctx.vsock_sock(), cfg.vm.vsock_port)];
+    if cfg.net.mode == "switch" {
+        vsock_ports.push(crate::vmm::VsockPort::bridge(
+            &ctx.vsock_sock(),
+            cfg.net.net_port,
+        ));
+    }
+    if ssh_agent_forwarding(cfg) {
+        vsock_ports.push(crate::vmm::VsockPort::bridge(
+            &ctx.vsock_sock(),
+            crate::run::SSH_AGENT_VSOCK_PORT,
+        ));
+    }
+
     let spec = crate::vmm::VmSpec {
         kernel,
         cmdline,
@@ -280,9 +298,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         shares,
         vsock_cid: 3,
         vsock_socket: ctx.vsock_sock(),
-        // CI reaches the guest agent over the exec channel only (networking is a leased
-        // tap, not the vsock switch).
-        vsock_ports: vec![crate::vmm::VsockPort::exec(&ctx.vsock_sock(), cfg.vm.vsock_port)],
+        vsock_ports,
         cpus,
         mem: mem.clone(),
         shared_mem: true,

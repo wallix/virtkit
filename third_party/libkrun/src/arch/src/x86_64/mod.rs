@@ -160,7 +160,13 @@ pub fn arch_memory_regions(
         ram_last_addr,
         shm_start_addr,
         page_size,
-        initrd_addr: ram_last_addr - initrd_size,
+        // Keep the initrd below 4 GiB. It is passed to the guest via the boot
+        // protocol's 32-bit ramdisk_image field (this setup_header has no
+        // ext_ramdisk_image for the high bits), so placing it at the top of all RAM
+        // truncates the address once the guest has >~3 GiB and the kernel can't find
+        // it. Put it at the top of the sub-gap RAM region instead. (Local patch —
+        // see ../../VENDOR.md.)
+        initrd_addr: ram_last_addr.min(MMIO_MEM_START) - initrd_size,
         firmware_addr,
     };
     (info, regions)

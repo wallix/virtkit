@@ -14,6 +14,13 @@ that a static `libkrun.a` link hits.
 
 ## Local patches
 
+`src/arch/src/x86_64/mod.rs` — place the initrd below 4 GiB. It was placed at the top
+of all guest RAM, but the boot protocol's `setup_header` here has no `ext_ramdisk_image`
+field, so the address is passed only through the 32-bit `ramdisk_image`. Once the guest
+has more than ~3 GiB, the top of RAM is above 4 GiB and the address truncated, so the
+kernel could not find the initrd and panicked (`Unable to mount root fs`). The initrd is
+now placed at the top of the sub-gap (below-4 GiB) RAM region. Search for `initrd_addr`.
+
 `src/libkrun/Cargo.toml` + `src/libkrun/build.rs` — dropped `cdylib` from the crate's
 `crate-type` (now just `lib`). virtkit links the crate as an rlib path dependency; the
 upstream `cdylib` (`libkrun.so`, for C consumers) is never built and is unsupported on

@@ -303,7 +303,8 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
 
     // 3. boot
     let console = work.join("console.log");
-    let (vmm, addr) = select_vmm(&args.cloud_hypervisor, &vsock, VSOCK_PORT);
+    let vmm = crate::vmm::selected(&args.cloud_hypervisor);
+    let addr = crate::vmm::exec_addr(&vsock, VSOCK_PORT);
     println!(
         "virtkit: booting {} (cpus={}, mem={})",
         vmm.name(),
@@ -626,34 +627,6 @@ async fn run_shell(addr: &SocketAddr) -> Result<()> {
     Ok(())
 }
 
-/// Pick the VMM backend and the matching exec-connect address. Cloud-hypervisor is
-/// the default; `VIRTKIT_VMM=libkrun` selects the libkrun backend when it is compiled
-/// in (the `libkrun` feature). libkrun listens for the exec channel on `exec_sock`
-/// itself and forwards raw to the guest, so the host connects with a plain unix
-/// socket — no hybrid-vsock `CONNECT`.
-fn select_vmm(
-    cloud_hypervisor: &Path,
-    exec_sock: &Path,
-    exec_port: u32,
-) -> (Box<dyn Vmm>, SocketAddr) {
-    #[cfg(feature = "libkrun")]
-    if std::env::var_os("VIRTKIT_VMM").is_some_and(|v| v == "libkrun") {
-        return (
-            Box::new(crate::vmm::Libkrun),
-            SocketAddr::Unix(exec_sock.to_path_buf()),
-        );
-    }
-    (
-        Box::new(crate::vmm::CloudHypervisor {
-            bin: cloud_hypervisor.to_path_buf(),
-        }),
-        SocketAddr::VsockMux {
-            path: exec_sock.to_path_buf(),
-            port: exec_port,
-        },
-    )
-}
-
 fn spawn_vmm(vmm: &dyn Vmm, spec: &crate::vmm::VmSpec) -> Result<Child> {
     let log = std::fs::File::create(spec.serial_log.with_extension("vmm.log"))?;
     let mut cmd = vmm.command(spec);
@@ -845,7 +818,8 @@ pub(crate) async fn boot_session(
         serial_log: console.clone(),
         api_socket: None,
     };
-    let (vmm, addr) = select_vmm(cloud_hypervisor, &vsock, VSOCK_PORT);
+    let vmm = crate::vmm::selected(cloud_hypervisor);
+    let addr = crate::vmm::exec_addr(&vsock, VSOCK_PORT);
     let mut ch = spawn_vmm(vmm.as_ref(), &spec)?;
     let deadline = Instant::now() + Duration::from_secs(boot_timeout_secs);
     loop {

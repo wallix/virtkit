@@ -10,11 +10,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use virtkit_agent::addr::SocketAddr;
 
 use crate::image::ResolvedImage;
 use crate::jobctx::JobCtx;
-use crate::vmm::Vmm;
 
 /// A job VM's boot medium: a copy-on-write ext4 disk (with an optional initrd —
 /// a self-booting image ships one; a generic guest on the all-built-in pinned
@@ -291,12 +289,12 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         net,
         balloon: cfg.vm.balloon,
         serial_log: ctx.console_log(),
-        api_socket: Some(ctx.api_sock()),
+        // libkrun has no API socket (it is driven as a subprocess); cloud-hypervisor
+        // uses one for graceful shutdown in stop_vm.
+        api_socket: (!crate::vmm::libkrun_selected()).then(|| ctx.api_sock()),
     };
-    let ch_command = crate::vmm::CloudHypervisor {
-        bin: cfg.cloud_hypervisor().to_path_buf(),
-    }
-    .command(&spec);
+    let vmm = crate::vmm::selected(cfg.cloud_hypervisor());
+    let ch_command = vmm.command(&spec);
     let mut ch_child = spawn_detached(ch_command, &ctx.ch_log())
         .with_context(|| format!("spawning {}", cfg.cloud_hypervisor().display()))?;
     std::fs::write(ctx.ch_pidfile(), ch_child.id().to_string())?;
@@ -311,10 +309,7 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
 
     // Ready = the in-guest virtkit-agent answers on vsock (systemd is up, the agent
     // socket is active). Each status attempt has its own internal timeout.
-    let addr = SocketAddr::VsockMux {
-        path: ctx.vsock_sock(),
-        port: cfg.vm.vsock_port,
-    };
+    let addr = crate::vmm::exec_addr(&ctx.vsock_sock(), cfg.vm.vsock_port);
     let start = Instant::now();
     let deadline = start + Duration::from_secs(cfg.vm.boot_timeout_secs);
     loop {
@@ -322,7 +317,8 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         if let Some(status) = ch_child.try_wait()? {
             log_tail(&ctx.console_log(), 30);
             bail!(
-                "cloud-hypervisor exited during boot ({status}, see {})",
+                "{} exited during boot ({status}, see {})",
+                vmm.name(),
                 ctx.ch_log().display()
             );
         }
@@ -605,19 +601,35 @@ pub fn stop_vm(ctx: &JobCtx) {
     if let Some(pid) = read_pidfile(&ctx.ch_pidfile()) {
         let tag = ctx.job_dir.to_string_lossy().into_owned();
         if pid_running(pid, &tag) {
-            let api = ctx.api_sock();
-            let _ = ch_api_put(&api, "vm.power-button");
-            if !wait_gone(
-                pid,
-                &tag,
-                Duration::from_secs(ctx.cfg.vm.shutdown_timeout_secs),
-            ) {
-                let _ = ch_api_put(&api, "vm.shutdown");
-                if !wait_gone(pid, &tag, Duration::from_secs(5)) {
-                    unsafe { libc::kill(pid, libc::SIGTERM) };
-                    if !wait_gone(pid, &tag, Duration::from_secs(3)) {
-                        unsafe { libc::kill(pid, libc::SIGKILL) };
-                        wait_gone(pid, &tag, Duration::from_secs(3));
+            if crate::vmm::libkrun_selected() {
+                // libkrun is a subprocess with no API socket, and on x86_64 its
+                // shutdown eventfd is unwired — there is no host-side ACPI poweroff.
+                // Terminate the process; the guest and its throwaway overlay go with
+                // it. SIGTERM first, then SIGKILL.
+                unsafe { libc::kill(pid, libc::SIGTERM) };
+                if !wait_gone(
+                    pid,
+                    &tag,
+                    Duration::from_secs(ctx.cfg.vm.shutdown_timeout_secs),
+                ) {
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    wait_gone(pid, &tag, Duration::from_secs(3));
+                }
+            } else {
+                let api = ctx.api_sock();
+                let _ = ch_api_put(&api, "vm.power-button");
+                if !wait_gone(
+                    pid,
+                    &tag,
+                    Duration::from_secs(ctx.cfg.vm.shutdown_timeout_secs),
+                ) {
+                    let _ = ch_api_put(&api, "vm.shutdown");
+                    if !wait_gone(pid, &tag, Duration::from_secs(5)) {
+                        unsafe { libc::kill(pid, libc::SIGTERM) };
+                        if !wait_gone(pid, &tag, Duration::from_secs(3)) {
+                            unsafe { libc::kill(pid, libc::SIGKILL) };
+                            wait_gone(pid, &tag, Duration::from_secs(3));
+                        }
                     }
                 }
             }

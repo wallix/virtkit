@@ -12,6 +12,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use virtkit_agent::addr::SocketAddr;
+
 /// A virtio-blk disk, attached in order (first = `/dev/vda`, then `vdb`, …).
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Disk {
@@ -226,6 +228,40 @@ impl Vmm for Libkrun {
 
     fn name(&self) -> &'static str {
         "libkrun"
+    }
+}
+
+/// Whether the libkrun backend is selected: compiled in (the `libkrun` feature) and
+/// requested via `VIRTKIT_VMM=libkrun`. Read on each call so every CI phase
+/// (prepare/run/cleanup run as separate processes) agrees — gitlab-runner passes the
+/// same environment to each exec.
+pub fn libkrun_selected() -> bool {
+    cfg!(feature = "libkrun") && std::env::var_os("VIRTKIT_VMM").is_some_and(|v| v == "libkrun")
+}
+
+/// The selected VMM backend for a boot.
+pub fn selected(cloud_hypervisor: &Path) -> Box<dyn Vmm> {
+    #[cfg(feature = "libkrun")]
+    if libkrun_selected() {
+        return Box::new(Libkrun);
+    }
+    Box::new(CloudHypervisor {
+        bin: cloud_hypervisor.to_path_buf(),
+    })
+}
+
+/// The exec-channel connect address for the selected backend: libkrun listens on the
+/// base socket and forwards raw to the guest (a plain unix connect), while
+/// cloud-hypervisor multiplexes guest ports behind the hybrid-vsock `CONNECT`
+/// handshake.
+pub fn exec_addr(vsock_socket: &Path, port: u32) -> SocketAddr {
+    if libkrun_selected() {
+        SocketAddr::Unix(vsock_socket.to_path_buf())
+    } else {
+        SocketAddr::VsockMux {
+            path: vsock_socket.to_path_buf(),
+            port,
+        }
     }
 }
 

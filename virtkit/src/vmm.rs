@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// A virtio-blk disk, attached in order (first = `/dev/vda`, then `vdb`, …).
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Disk {
     pub path: PathBuf,
     /// `true` for a qcow2 (a CoW overlay or a forked build stage); `false` for a
@@ -47,6 +48,7 @@ impl Disk {
 }
 
 /// A virtio-fs share: the tag the guest mounts by and the virtiofsd socket.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct FsShare {
     pub tag: String,
     pub socket: PathBuf,
@@ -54,12 +56,14 @@ pub struct FsShare {
 
 /// Guest networking. `switch`-mode guests add no device here — the in-guest agent
 /// bridges eth0 to the userspace switch over vsock — so they use [`Net::None`].
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Net {
     None,
     Tap { tap: String, mac: String },
 }
 
 /// Everything needed to boot one microVM, independent of the VMM.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct VmSpec {
     pub kernel: PathBuf,
     pub cmdline: String,
@@ -147,6 +151,25 @@ impl Vmm for CloudHypervisor {
             cmd.arg("--balloon")
                 .arg("size=0,deflate_on_oom=on,free_page_reporting=on");
         }
+        cmd
+    }
+}
+
+/// libkrun: boots `spec` by re-execing `vk __libkrun-boot <spec-json>` — a per-VM
+/// subprocess that links libkrun and drives its C API (see [`crate::libkrun_sys`]).
+/// Running it as a subprocess keeps the same lifecycle as [`CloudHypervisor`]
+/// (held `Child` / `spawn_tied`), with no in-process VMM in the orchestrator.
+// Constructed once backend selection is wired (the default-flip increment); the
+// impl and the `__libkrun-boot` subprocess it execs are exercised meanwhile.
+#[allow(dead_code)]
+pub struct Libkrun;
+
+impl Vmm for Libkrun {
+    fn command(&self, spec: &VmSpec) -> Command {
+        let json = serde_json::to_string(spec).expect("serializing VmSpec to JSON");
+        let exe = std::env::current_exe().unwrap_or_else(|_| "vk".into());
+        let mut cmd = Command::new(exe);
+        cmd.arg("__libkrun-boot").arg(json);
         cmd
     }
 }

@@ -5,10 +5,10 @@
 #   - default: Docker — `docker build` the devcontainer image, then `docker run`
 #     the compile in it.
 #   - --use-virtkit=<DIST>: dogfood — use the vk binary in <DIST> to build the
-#     devcontainer Dockerfile into a microVM and compile a shared checkout inside it
-#     (vk embeds the kernel + agent, so DIST needs only vk; cloud-hypervisor comes
-#     from PATH, or DIST/cloud-hypervisor if present). Set VK_CACHE=host:port to
-#     push/pull the build image from a `vk registry serve` by its content key.
+#     devcontainer Dockerfile into a microVM and compile a shared checkout inside it.
+#     vk embeds the kernel + agent and boots on its built-in libkrun, so DIST needs
+#     only the vk binary. Set VK_CACHE=host:port to push/pull the build image from a
+#     `vk registry serve` by its content key.
 #
 # Output goes to ./dist as stripped, static-pie musl ELF binaries. Both backends
 # mount the repo at /work and pass identical flags, so the bytes match either way.
@@ -38,17 +38,13 @@ if [ -n "$USE_VIRTKIT" ] && [ -n "$BOOTSTRAP_CHECK" ]; then
   exit 2
 fi
 
-# Fail fast: check the dogfood-rebuild prerequisites up front, before the slow Docker build
-# and compile — not three minutes later when the rebuild starts. The fresh vk +
-# vk-agent come from the Docker build below; only the guest kernel and the VMM are
-# external to it.
+# Fail fast: check the dogfood-rebuild prerequisite up front, before the slow Docker
+# build and compile. The fresh vk comes from the Docker build below with the guest
+# kernel embedded and boots on its built-in libkrun — so the rebuild needs only
+# dist/vmlinux (to embed into the vk it produces), no external VMM.
 if [ -n "$BOOTSTRAP_CHECK" ]; then
   [ -e "$OUT/vmlinux" ] || {
     echo "--bootstrap-check needs $OUT/vmlinux (run ./build-kernel.sh first)" >&2
-    exit 1
-  }
-  [ -x "$OUT/cloud-hypervisor" ] || command -v cloud-hypervisor >/dev/null || {
-    echo "--bootstrap-check needs cloud-hypervisor (in PATH or at $OUT/cloud-hypervisor)" >&2
     exit 1
   }
 fi
@@ -90,13 +86,7 @@ if [ -n "$USE_VIRTKIT" ]; then
   # vk is self-contained (embedded kernel + agent), so DIST needs only the vk binary.
   VK="$USE_VIRTKIT/vk"
   [ -e "$VK" ] || { echo "missing $VK (need a populated --use-virtkit dir)" >&2; exit 1; }
-  ch_args=()
-  if [ -x "$USE_VIRTKIT/cloud-hypervisor" ]; then
-    ch_args=(--cloud-hypervisor "$USE_VIRTKIT/cloud-hypervisor")
-  elif ! command -v cloud-hypervisor >/dev/null; then
-    echo "missing cloud-hypervisor (in PATH or at $USE_VIRTKIT/cloud-hypervisor)" >&2
-    exit 1
-  fi
+  # vk boots the build microVM on its built-in libkrun backend — no external VMM.
   cache_args=()
   [ -n "${VK_CACHE:-}" ] && cache_args=(--cache-registry "$VK_CACHE")
 
@@ -114,7 +104,6 @@ if [ -n "$USE_VIRTKIT" ]; then
     --context .devcontainer \
     --workdir "$PWD" \
     --net \
-    "${ch_args[@]}" \
     "${cache_args[@]}" \
     -- "${exports}${BUILD_CMD}"
 else

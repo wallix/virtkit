@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build binaries (vk-driver, vk-agent)
+      - name: Build binaries (vk, vk-agent)
         run: ./build.sh
 
       - name: Upload binary artifacts
@@ -38,9 +38,9 @@ jobs:
         with:
           name: ${{ inputs.artifact-prefix }}-binaries-${{ github.sha }}
           path: |
-            dist/vk-driver
+            dist/vk
             dist/vk-agent
-            dist/vk-driver.sha256
+            dist/vk.sha256
             dist/vk-agent.sha256
             dist/build-info.txt
           retention-days: ${{ inputs.retention-days }}

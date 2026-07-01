@@ -137,8 +137,8 @@ pub fn build(opts: &Options) -> Result<Built> {
             opts.cloud_hypervisor
                 .clone()
                 .context("--microvm needs --cloud-hypervisor")?,
-            opts.kernel.clone().context("--microvm needs --kernel")?,
-            opts.agent.clone().context("--microvm needs --agent")?,
+            crate::embed::resolve(crate::embed::Asset::Kernel, opts.kernel.as_deref(), &scratch)?,
+            crate::embed::resolve(crate::embed::Asset::Agent, opts.agent.as_deref(), &scratch)?,
             scratch.clone(),
             cache,
             opts.journal,

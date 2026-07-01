@@ -3,13 +3,13 @@
 //!
 //! Wire-up in /etc/gitlab-runner/config.toml:
 //!   [runners.custom]
-//!     config_exec   = "/usr/local/bin/virtkit"
+//!     config_exec   = "/usr/local/bin/vk"
 //!     config_args   = ["gitlab", "config"]
-//!     prepare_exec  = "/usr/local/bin/virtkit"
+//!     prepare_exec  = "/usr/local/bin/vk"
 //!     prepare_args  = ["gitlab", "prepare"]
-//!     run_exec      = "/usr/local/bin/virtkit"
+//!     run_exec      = "/usr/local/bin/vk"
 //!     run_args      = ["gitlab", "run"]
-//!     cleanup_exec  = "/usr/local/bin/virtkit"
+//!     cleanup_exec  = "/usr/local/bin/vk"
 //!     cleanup_args  = ["gitlab", "cleanup"]
 
 #[cfg(target_env = "musl")]
@@ -21,6 +21,7 @@ mod config;
 mod convert;
 mod cpio;
 mod dockerhash;
+mod embed;
 mod ensure;
 mod executor;
 mod ext4;
@@ -160,8 +161,8 @@ enum Cmd {
         #[arg(long = "print-plan")]
         print_plan: bool,
         /// run the build in a microVM (RUN executes in a Cloud Hypervisor guest);
-        /// needs --cloud-hypervisor/--kernel/--agent. Default: host backend
-        /// (FROM scratch + COPY only).
+        /// needs --cloud-hypervisor (kernel/agent default to the copies embedded in
+        /// `vk`). Default: host backend (FROM scratch + COPY only).
         #[arg(long)]
         microvm: bool,
         #[arg(long = "cloud-hypervisor")]
@@ -347,9 +348,10 @@ enum Cmd {
         /// command there, so its outputs land back on the host
         #[arg(long, value_name = "DIR")]
         workdir: Option<PathBuf>,
-        /// Pinned guest kernel (the pinned vmlinux: virtio + ext4 built in)
-        #[arg(long, default_value = "/usr/local/lib/vk/vmlinux")]
-        kernel: PathBuf,
+        /// Pinned guest kernel (the pinned vmlinux: virtio + ext4 built in).
+        /// Defaults to the copy embedded in `vk`.
+        #[arg(long)]
+        kernel: Option<PathBuf>,
         /// Where the rootfs comes from: oci (registry pull, no docker daemon), docker
         /// (docker export), or auto (registry, falling back to docker for an unpushed image)
         #[arg(long, value_enum, default_value = "auto")]
@@ -364,9 +366,9 @@ enum Cmd {
         /// plain HTTP registry (oci/auto)
         #[arg(long)]
         insecure: bool,
-        /// Static (musl) virtkit-agent injected as PID 1
-        #[arg(long = "agent", default_value = "/usr/local/lib/vk/vk-agent")]
-        agent: PathBuf,
+        /// Static (musl) vk-agent injected as PID 1. Defaults to the copy embedded in `vk`.
+        #[arg(long = "agent")]
+        agent: Option<PathBuf>,
         /// cloud-hypervisor binary
         #[arg(long, default_value = "cloud-hypervisor")]
         cloud_hypervisor: PathBuf,

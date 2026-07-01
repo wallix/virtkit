@@ -4,18 +4,18 @@
 # Two backends produce the same artifact with the same toolchain:
 #   - default: Docker — `docker build` the devcontainer image, then `docker run`
 #     the compile in it.
-#   - --use-virtkit=<DIST>: dogfood — use the virtkit binary in <DIST> to build the
+#   - --use-virtkit=<DIST>: dogfood — use the vk binary in <DIST> to build the
 #     devcontainer Dockerfile into a microVM and compile a shared checkout inside it
-#     (DIST also supplies vmlinux + virtkit-agent; cloud-hypervisor comes from PATH,
-#     or DIST/cloud-hypervisor if present). Set VK_CACHE=host:port to push/pull the
-#     build image from a `virtkit registry serve` by its content key.
+#     (vk embeds the kernel + agent, so DIST needs only vk; cloud-hypervisor comes
+#     from PATH, or DIST/cloud-hypervisor if present). Set VK_CACHE=host:port to
+#     push/pull the build image from a `vk registry serve` by its content key.
 #
 # Output goes to ./dist as stripped, static-pie musl ELF binaries. Both backends
 # mount the repo at /work and pass identical flags, so the bytes match either way.
 #
-# --bootstrap-check: after the default Docker build, rebuild with the just-built virtkit
+# --bootstrap-check: after the default Docker build, rebuild with the just-built vk
 # (the dogfood backend, on a clean copy of the tree in a tmp dir) and assert the binaries
-# are byte-for-byte identical — proof the microVM backend reproduces Docker, i.e. virtkit
+# are byte-for-byte identical — proof the microVM backend reproduces Docker, i.e. vk
 # can rebuild itself. Needs dist/vmlinux (run ./build-kernel.sh first).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -39,8 +39,8 @@ if [ -n "$USE_VIRTKIT" ] && [ -n "$BOOTSTRAP_CHECK" ]; then
 fi
 
 # Fail fast: check the dogfood-rebuild prerequisites up front, before the slow Docker build
-# and compile — not three minutes later when the rebuild starts. The fresh virtkit +
-# virtkit-agent come from the Docker build below; only the guest kernel and the VMM are
+# and compile — not three minutes later when the rebuild starts. The fresh vk +
+# vk-agent come from the Docker build below; only the guest kernel and the VMM are
 # external to it.
 if [ -n "$BOOTSTRAP_CHECK" ]; then
   [ -e "$OUT/vmlinux" ] || {
@@ -72,14 +72,24 @@ BUILD_ENV=(
   LIBCAPNG_LIB_PATH=/usr/lib
 )
 
+# `vk` embeds the guest kernel and vk-agent, so the compile is two phases: build
+# vk-agent first, then build vk with VK_EMBED_* pointing at that agent and the
+# pinned vmlinux (both under /work, where the repo is mounted in either backend).
+# The kernel is optional here — without dist/vmlinux, vk builds without an embedded
+# kernel (it then needs --kernel at runtime); the release always has it.
+EMBED_ENV="VK_EMBED_AGENT=/work/target/$TARGET/release/vk-agent"
+if [ -e "$OUT/vmlinux" ]; then
+  EMBED_ENV="$EMBED_ENV VK_EMBED_KERNEL=/work/$OUT/vmlinux"
+else
+  echo "warning: $OUT/vmlinux not found — building vk without an embedded kernel (run ./build-kernel.sh first)" >&2
+fi
+BUILD_CMD="cargo build --release -p vk-agent && env $EMBED_ENV cargo build --release -p vk-driver"
+
 if [ -n "$USE_VIRTKIT" ]; then
-  # ---- dogfood backend: virtkit builds the env image + compiles in a microVM ----
-  VK="$USE_VIRTKIT/vk-driver"
-  KERNEL="$USE_VIRTKIT/vmlinux"
-  AGENT="$USE_VIRTKIT/vk-agent"
-  for f in "$VK" "$KERNEL" "$AGENT"; do
-    [ -e "$f" ] || { echo "missing $f (need a populated --use-virtkit dir)" >&2; exit 1; }
-  done
+  # ---- dogfood backend: vk builds the env image + compiles in a microVM ----
+  # vk is self-contained (embedded kernel + agent), so DIST needs only the vk binary.
+  VK="$USE_VIRTKIT/vk"
+  [ -e "$VK" ] || { echo "missing $VK (need a populated --use-virtkit dir)" >&2; exit 1; }
   ch_args=()
   if [ -x "$USE_VIRTKIT/cloud-hypervisor" ]; then
     ch_args=(--cloud-hypervisor "$USE_VIRTKIT/cloud-hypervisor")
@@ -104,11 +114,9 @@ if [ -n "$USE_VIRTKIT" ]; then
     --context .devcontainer \
     --workdir "$PWD" \
     --net \
-    --kernel "$KERNEL" \
-    --agent "$AGENT" \
     "${ch_args[@]}" \
     "${cache_args[@]}" \
-    -- "${exports}cargo build --release --workspace"
+    -- "${exports}${BUILD_CMD}"
 else
   # ---- default backend: Docker ----
   docker build -t "$IMAGE" -f .devcontainer/Dockerfile .devcontainer
@@ -123,64 +131,68 @@ else
     "${docker_env[@]}" \
     -v "$PWD":/work -w /work \
     "$IMAGE" \
-    cargo build --release --workspace
+    sh -c "$BUILD_CMD"
 fi
 
 mkdir -p "$OUT"
 # Replace atomically (write a temp, then rename): a plain cp truncates the destination and
-# would fail "Text file busy" if the old $OUT/virtkit is still being executed (e.g. by a
+# would fail "Text file busy" if the old $OUT/vk is still being executed (e.g. by a
 # previous --use-virtkit / --bootstrap-check run); rename never does.
-for b in vk-driver vk-agent; do
+for b in vk vk-agent; do
   cp "target/$TARGET/release/$b" "$OUT/.$b.tmp"
   mv -f "$OUT/.$b.tmp" "$OUT/$b"
 done
 
 # Reproducibility manifest: the pinned inputs and the artifact hashes. Anyone can
 # rebuild from the same commit + inputs and confirm byte-for-byte:
-#   git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk-driver.sha256 dist/vk-agent.sha256
-( cd "$OUT" && sha256sum vk-driver > vk-driver.sha256 && sha256sum vk-agent > vk-agent.sha256 )
+#   git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk.sha256 dist/vk-agent.sha256
+( cd "$OUT" && sha256sum vk > vk.sha256 && sha256sum vk-agent > vk-agent.sha256 )
 base_image=$(sed -nE 's/^FROM (rust:.*)$/\1/p' .devcontainer/Dockerfile)
 toolchain=$(sed -nE 's/^channel = "(.*)"$/\1/p' rust-toolchain.toml)
 commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 [ -n "$(git status --porcelain 2>/dev/null)" ] && commit="$commit (dirty)"
 cat > "$OUT/build-info.txt" <<EOF
 # virtkit reproducible build manifest
-# Verify: git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk-driver.sha256 dist/vk-agent.sha256
+# Verify: git checkout <git_commit> && ./build.sh && sha256sum -c dist/vk.sha256 dist/vk-agent.sha256
 git_commit:      ${commit}
 rust_toolchain:  ${toolchain}
 base_image:      ${base_image}
 
-$(cat "$OUT/vk-driver.sha256")
+$(cat "$OUT/vk.sha256")
 $(cat "$OUT/vk-agent.sha256")
 EOF
 
 echo
 echo "built into $OUT/:"
-file "$OUT/vk-driver" "$OUT/vk-agent"
+file "$OUT/vk" "$OUT/vk-agent"
 echo
 cat "$OUT/build-info.txt"
 
 if [ -n "$BOOTSTRAP_CHECK" ]; then
-  # Rebuild with the virtkit we just produced (the dogfood backend) and confirm it
+  # Rebuild with the vk we just produced (the dogfood backend) and confirm it
   # reproduces the Docker build bit-for-bit. The just-built $OUT is itself a valid
-  # --use-virtkit toolchain (vk-driver + vk-agent built above, vmlinux from
+  # --use-virtkit toolchain (vk + vk-agent built above, vmlinux from
   # build-kernel.sh). The second build runs on a clean copy of the tree in a tmp dir —
   # a full independent compile, mounted at the same /work path so the container-side
   # paths (and thus the reproducible bytes) match the Docker build.
   echo
-  echo "bootstrap check: rebuilding with the freshly built virtkit in a microVM…"
+  echo "bootstrap check: rebuilding with the freshly built vk in a microVM…"
   boot_dist="$PWD/$OUT"
   boot_tmp=$(mktemp -d)
   trap 'rm -rf "$boot_tmp"' EXIT
   # Clean working-tree copy (no target/.git/dist) so the rebuild can't reuse this build's
   # target/ and is a genuine from-scratch compile.
   tar -c --exclude=./.git --exclude=./target --exclude="./$OUT" . | tar -x -C "$boot_tmp"
+  # `vk` embeds the kernel, so the rebuild must see the same vmlinux at dist/vmlinux
+  # (the tree copy above excludes dist/); without it the two vk binaries would differ.
+  mkdir -p "$boot_tmp/$OUT"
+  cp "$boot_dist/vmlinux" "$boot_tmp/$OUT/vmlinux"
   ( cd "$boot_tmp" && ./build.sh --use-virtkit="$boot_dist" )
 
   echo
   echo "bootstrap check: comparing sha256…"
   mismatch=""
-  for b in vk-driver vk-agent; do
+  for b in vk vk-agent; do
     docker_sha=$(sha256sum < "$OUT/$b" | cut -d' ' -f1)
     virtkit_sha=$(sha256sum < "$boot_tmp/$OUT/$b" | cut -d' ' -f1)
     if [ "$docker_sha" = "$virtkit_sha" ]; then
@@ -191,8 +203,8 @@ if [ -n "$BOOTSTRAP_CHECK" ]; then
     fi
   done
   if [ -n "$mismatch" ]; then
-    echo "bootstrap check FAILED: the virtkit backend did not reproduce the Docker build" >&2
+    echo "bootstrap check FAILED: the vk backend did not reproduce the Docker build" >&2
     exit 1
   fi
-  echo "bootstrap check passed: Docker and virtkit backends produce identical binaries"
+  echo "bootstrap check passed: Docker and vk backends produce identical binaries"
 fi

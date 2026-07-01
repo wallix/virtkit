@@ -534,10 +534,7 @@ async fn drive(
     let deadline = Instant::now() + Duration::from_secs(args.boot_timeout_secs);
     loop {
         if let Some(status) = ch.try_wait()? {
-            bail!(
-                "cloud-hypervisor exited during boot ({status})\n{}",
-                tail(console, 20)
-            );
+            bail!("{}", boot_failure(console, status));
         }
         if vk_agent::status::get_status(addr).await.is_ok() {
             break;
@@ -653,6 +650,26 @@ fn spawn_vmm(vmm: &dyn Vmm, spec: &crate::vmm::VmSpec) -> Result<Child> {
     // Self-reap the VM if virtkit dies before teardown — a leaked VMM is a whole
     // running guest, not just an idle helper (spawn_tied).
     crate::fleet::spawn_tied(cmd).context("spawning the VMM")
+}
+
+/// Report a VMM that exited during boot: name the backend that actually ran (libkrun
+/// by default, else cloud-hypervisor) and show the tails of both the guest serial log
+/// and the VMM's own stdout/stderr (`<serial>.vmm.log`) — libkrun prints its abort
+/// reason there, so surfacing it is what makes a failed boot legible.
+fn boot_failure(console: &Path, status: std::process::ExitStatus) -> String {
+    let vmm = if crate::vmm::libkrun_selected() {
+        "libkrun"
+    } else {
+        "cloud-hypervisor"
+    };
+    let vmm_log = console.with_extension("vmm.log");
+    format!(
+        "{vmm} exited during boot ({status})\n--- serial ({}) ---\n{}\n--- vmm ({}) ---\n{}",
+        console.display(),
+        tail(console, 20),
+        vmm_log.display(),
+        tail(&vmm_log, 20),
+    )
 }
 
 fn tail(path: &Path, lines: usize) -> String {
@@ -845,10 +862,7 @@ pub(crate) async fn boot_session(
     let deadline = Instant::now() + Duration::from_secs(boot_timeout_secs);
     loop {
         if let Some(status) = ch.try_wait()? {
-            bail!(
-                "cloud-hypervisor exited during boot ({status})\n{}",
-                tail(&console, 20)
-            );
+            bail!("{}", boot_failure(&console, status));
         }
         if vk_agent::status::get_status(&addr).await.is_ok() {
             break;

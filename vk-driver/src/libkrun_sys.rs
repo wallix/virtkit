@@ -76,8 +76,15 @@ fn mem_mib(mem: &str) -> Result<u32> {
 /// off (or never, until then) — the caller is the `__libkrun-boot` subprocess.
 pub fn boot(spec: &VmSpec) -> Result<()> {
     unsafe {
-        // verbose to stderr while the backend is young; quieten once it's the default.
-        krun_init_log(2, 4, 0, 0);
+        // libkrun logs to stderr (captured to the VMM log). Its debug level fires on the
+        // block / virtio-fs I/O hot path and measurably slows a build, so default to warn
+        // and only raise to debug under VIRTKIT_DEBUG=1. (2 = warn, 4 = debug.)
+        let level = if std::env::var("VIRTKIT_DEBUG").as_deref() == Ok("1") {
+            4
+        } else {
+            2
+        };
+        krun_init_log(2, level, 0, 0);
 
         let ctx = krun_create_ctx();
         ck("krun_create_ctx", ctx)?;

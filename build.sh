@@ -106,15 +106,15 @@ if [ -n "$USE_VIRTKIT" ]; then
     exports+="export ${e%%=*}='$v'; "
   done
 
-  # A release compile of the whole workspace is CPU- and memory-hungry — vk in
-  # particular, which embeds the ~24M kernel + ~7M agent. `run` defaults (2 cpus,
-  # 1G) OOM-kill rustc, so size the build VM for the compile.
+  # A release compile of the whole workspace is CPU- and memory-hungry, so size the
+  # build VM for it: all the host's CPUs (--cpus host) for parallelism, and enough
+  # RAM that rustc is not OOM-killed (the `run` defaults are 2 cpus / 1G).
   "$VK" run \
     --file .devcontainer/Dockerfile \
     --context .devcontainer \
     --workdir "$PWD" \
     --net \
-    --cpus 4 \
+    --cpus host \
     --mem 8G \
     "${cache_args[@]}" \
     -- "${exports}${BUILD_CMD}"

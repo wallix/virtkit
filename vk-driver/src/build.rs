@@ -122,6 +122,23 @@ pub fn build(opts: &Options) -> Result<Built> {
     } else {
         std::env::temp_dir().join(format!("virtkit-build-{}", std::process::id()))
     };
+    // Resolve the microVM's kernel + agent up front and hold them for the whole build:
+    // an embedded asset lives in a memfd whose /proc/self/fd path is valid only while the
+    // fd is open, and every stage boot (and the initramfs packer) reopens it.
+    let (kernel, agent) = if opts.microvm {
+        (
+            Some(crate::embed::resolve(
+                crate::embed::Asset::Kernel,
+                opts.kernel.as_deref(),
+            )?),
+            Some(crate::embed::resolve(
+                crate::embed::Asset::Agent,
+                opts.agent.as_deref(),
+            )?),
+        )
+    } else {
+        (None, None)
+    };
     let mut ex: Box<dyn Executor> = if opts.microvm {
         let cache = opts.cache_registry.clone().map(|repo| {
             crate::config::Registry::for_share(
@@ -133,12 +150,14 @@ pub fn build(opts: &Options) -> Result<Built> {
                 None,
             )
         });
+        let kernel = kernel.as_ref().expect("resolved under opts.microvm");
+        let agent = agent.as_ref().expect("resolved under opts.microvm");
         Box::new(MicroVm::new(
             opts.cloud_hypervisor
                 .clone()
                 .context("--microvm needs --cloud-hypervisor")?,
-            crate::embed::resolve(crate::embed::Asset::Kernel, opts.kernel.as_deref(), &scratch)?,
-            crate::embed::resolve(crate::embed::Asset::Agent, opts.agent.as_deref(), &scratch)?,
+            kernel.path.clone(),
+            agent.path.clone(),
             scratch.clone(),
             cache,
             opts.journal,

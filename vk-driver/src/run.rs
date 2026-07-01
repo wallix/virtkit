@@ -103,23 +103,23 @@ pub async fn run(args: &RunArgs) -> Result<()> {
     // Resolve the agent and kernel: an explicit flag wins, else the copy embedded
     // in `vk` (extracted into `work`), else the on-disk default.
     let result = async {
-        let agent =
-            crate::embed::resolve(crate::embed::Asset::Agent, args.agent.as_deref(), &work)?;
-        let kernel =
-            crate::embed::resolve(crate::embed::Asset::Kernel, args.kernel.as_deref(), &work)?;
-        if !agent.is_file() {
+        // Held for the VM's lifetime: an embedded asset lives in a memfd whose
+        // /proc/self/fd path is only valid while the fd is open.
+        let agent = crate::embed::resolve(crate::embed::Asset::Agent, args.agent.as_deref())?;
+        let kernel = crate::embed::resolve(crate::embed::Asset::Kernel, args.kernel.as_deref())?;
+        if !agent.is_embedded() && !agent.path.is_file() {
             bail!(
                 "vk-agent not found at {} (pass --agent, or use a `vk` with it embedded)",
-                agent.display()
+                agent.path.display()
             );
         }
-        if !kernel.is_file() {
+        if !kernel.is_embedded() && !kernel.path.is_file() {
             bail!(
                 "kernel not found at {} (pass --kernel, or use a `vk` with it embedded)",
-                kernel.display()
+                kernel.path.display()
             );
         }
-        build_and_boot(args, &work, &agent, &kernel).await
+        build_and_boot(args, &work, &agent.path, &kernel.path).await
     }
     .await;
     let _ = std::fs::remove_dir_all(&work);
@@ -647,6 +647,25 @@ fn spawn_vmm(vmm: &dyn Vmm, spec: &crate::vmm::VmSpec) -> Result<Child> {
     cmd.stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
+    // An embedded kernel is a CLOEXEC memfd addressed as /proc/self/fd/<n> (so idle
+    // helpers never inherit it). Hand it to the VMM alone by clearing CLOEXEC on that fd
+    // in the forked child, so it survives exec and the VMM can open the path.
+    if let Some(fd) = spec
+        .kernel
+        .to_str()
+        .and_then(|s| s.strip_prefix("/proc/self/fd/"))
+        .and_then(|n| n.parse::<std::os::unix::io::RawFd>().ok())
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: pre_exec runs in the forked child before exec; fcntl(F_SETFD) is
+        // async-signal-safe. F_SETFD 0 clears FD_CLOEXEC (the only fd flag).
+        unsafe {
+            cmd.pre_exec(move || match libc::fcntl(fd, libc::F_SETFD, 0) {
+                -1 => Err(std::io::Error::last_os_error()),
+                _ => Ok(()),
+            });
+        }
+    }
     // Self-reap the VM if virtkit dies before teardown — a leaked VMM is a whole
     // running guest, not just an idle helper (spawn_tied).
     crate::fleet::spawn_tied(cmd).context("spawning the VMM")

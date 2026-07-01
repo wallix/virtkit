@@ -13,6 +13,14 @@
 //! otherwise cost significant compile time and peak memory. build.rs supplies the
 //! paths via VK_EMBED_{KERNEL,AGENT}_PATH (an empty placeholder when nothing is
 //! provided, giving a zero-length blob that resolves to "not embedded").
+//!
+//! An embedded asset is materialised into an anonymous (CLOEXEC) memfd rather than a
+//! temp file, so nothing touches disk. The kernel is handed to the spawned VMM by
+//! clearing CLOEXEC on its fd for that one spawn (`run::spawn_vmm`), which then opens
+//! `/proc/self/fd/<n>`; the agent is only ever reopened in this process by the packer.
+use std::fs::File;
+use std::io::Write;
+use std::os::unix::io::FromRawFd;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -125,25 +133,64 @@ fn agent() -> Option<&'static [u8]> {
     None
 }
 
-/// Resolve an asset to a concrete path. An explicit override wins; otherwise the
-/// embedded copy is written into `dir` (created if needed); otherwise the on-disk
-/// default is used. The agent is written executable.
-pub fn resolve(asset: Asset, explicit: Option<&Path>, dir: &Path) -> Result<PathBuf> {
+/// A resolved asset: the path to hand a consumer, plus the memfd backing it when the
+/// asset is embedded.
+pub struct Resolved {
+    pub path: PathBuf,
+    /// The open (CLOEXEC) memfd for an embedded asset, held so its `/proc/self/fd/<n>`
+    /// path stays valid — the VMM opens the kernel (its spawn clears CLOEXEC on this fd)
+    /// and the in-process packer reopens the agent. `None` for an explicit --flag path or
+    /// the on-disk default.
+    _fd: Option<File>,
+}
+
+impl Resolved {
+    /// Whether this resolved to the embedded copy (a memfd) rather than a real path.
+    pub fn is_embedded(&self) -> bool {
+        self._fd.is_some()
+    }
+}
+
+/// Resolve an asset. An explicit override wins; otherwise the embedded copy is placed
+/// in an anonymous memfd — no disk copy — and addressed as `/proc/self/fd/<n>`, which a
+/// spawned VMM inherits and opens (and the in-process packer reopens); otherwise the
+/// on-disk default is used. The agent's mode is set by the initramfs/ext4 packers, so
+/// the backing file need not be executable.
+pub fn resolve(asset: Asset, explicit: Option<&Path>) -> Result<Resolved> {
     if let Some(p) = explicit {
-        return Ok(p.to_path_buf());
+        return Ok(Resolved {
+            path: p.to_path_buf(),
+            _fd: None,
+        });
     }
     if let Some(bytes) = asset.embedded() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        let out = dir.join(asset.filename());
-        std::fs::write(&out, bytes).with_context(|| {
-            format!("writing embedded {} to {}", asset.filename(), out.display())
-        })?;
-        if matches!(asset, Asset::Agent) {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o755))
-                .with_context(|| format!("marking {} executable", out.display()))?;
-        }
-        return Ok(out);
+        let (file, path) = memfd(asset.filename(), bytes)?;
+        return Ok(Resolved {
+            path,
+            _fd: Some(file),
+        });
     }
-    Ok(PathBuf::from(asset.default_path()))
+    Ok(Resolved {
+        path: PathBuf::from(asset.default_path()),
+        _fd: None,
+    })
+}
+
+/// Back `bytes` with an anonymous in-memory file and return it with its
+/// `/proc/self/fd/<n>` path. The fd is `CLOEXEC`, so idle helper children never inherit
+/// it; the kernel is handed to the VMM by clearing `CLOEXEC` on its fd only in that
+/// spawn (see `run::spawn_vmm`), and the agent is only ever reopened in-process. The
+/// caller holds the returned `File` to keep the fd open.
+fn memfd(name: &str, bytes: &[u8]) -> Result<(File, PathBuf)> {
+    let cname = std::ffi::CString::new(name).expect("asset name has no interior nul");
+    // SAFETY: `cname` is a valid C string; memfd_create returns an owned fd or -1/errno.
+    let fd = unsafe { libc::memfd_create(cname.as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error()).context("memfd_create");
+    }
+    // SAFETY: `fd` was just created and is owned by us.
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes)
+        .with_context(|| format!("writing embedded {name} to a memfd"))?;
+    Ok((file, PathBuf::from(format!("/proc/self/fd/{fd}"))))
 }

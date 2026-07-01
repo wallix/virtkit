@@ -22,11 +22,12 @@ use anyhow::{Result, bail};
 // (rlib -> shares virtkit's std; compiler-checked signatures). Every call returns
 // >= 0 on success, a negative errno on failure.
 use krun::{
-    krun_add_disk2, krun_add_vsock_port2, krun_create_ctx, krun_disable_implicit_init,
-    krun_init_log, krun_set_console_output, krun_set_kernel, krun_set_vm_config, krun_start_enter,
+    krun_add_disk2, krun_add_net_tap, krun_add_vsock_port2, krun_create_ctx,
+    krun_disable_implicit_init, krun_init_log, krun_set_console_output, krun_set_kernel,
+    krun_set_vm_config, krun_start_enter,
 };
 
-use crate::vmm::{Disk, VmSpec};
+use crate::vmm::{Disk, Net, VmSpec};
 
 const KRUN_KERNEL_FORMAT_ELF: u32 = 1;
 const KRUN_DISK_FORMAT_RAW: u32 = 0;
@@ -42,6 +43,23 @@ fn ck(what: &str, rc: i32) -> Result<()> {
 
 fn cstr(s: &str) -> CString {
     CString::new(s).expect("nul byte in libkrun argument")
+}
+
+/// Parse a `aa:bb:cc:dd:ee:ff` MAC into the 6 bytes `krun_add_net_tap` expects.
+fn parse_mac(s: &str) -> Result<[u8; 6]> {
+    let mut mac = [0u8; 6];
+    let mut octets = s.split(':');
+    for byte in &mut mac {
+        let octet = octets
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("MAC {s:?} has fewer than six octets"))?;
+        *byte = u8::from_str_radix(octet, 16)
+            .map_err(|_| anyhow::anyhow!("invalid MAC octet {octet:?} in {s:?}"))?;
+    }
+    if octets.next().is_some() {
+        bail!("MAC {s:?} has more than six octets");
+    }
+    Ok(mac)
 }
 
 /// Parse a memory size token (`"8G"`) into MiB for `krun_set_vm_config`.
@@ -104,6 +122,21 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
             add_disk(ctx, i, disk)?;
         }
 
+        // Networking. Net::Tap attaches a host tap by name (like CH's `--net tap=,mac=`);
+        // the guest gets a static address from the cmdline. Net::None is switch-mode: the
+        // guest agent bridges eth0 over the vsock net port, so no VMM net device is added.
+        match &spec.net {
+            Net::None => {}
+            Net::Tap { tap, mac } => {
+                let tap_c = cstr(tap);
+                let mac = parse_mac(mac)?;
+                ck(
+                    "krun_add_net_tap",
+                    krun_add_net_tap(ctx, tap_c.as_ptr(), mac.as_ptr(), 0, 0),
+                )?;
+            }
+        }
+
         // vsock ports. listen=true: libkrun listens on the host unix socket and
         // forwards host connections to the guest port (the exec channel). listen=false:
         // the guest dials the port and libkrun forwards to the host socket, where the
@@ -124,6 +157,38 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
         ck("krun_start_enter", krun_start_enter(ctx))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mem_mib, parse_mac};
+
+    #[test]
+    fn mac_roundtrip() {
+        assert_eq!(
+            parse_mac("52:54:00:d2:f0:01").unwrap(),
+            [0x52, 0x54, 0x00, 0xd2, 0xf0, 0x01]
+        );
+        assert_eq!(
+            parse_mac("aa:bb:cc:dd:ee:ff").unwrap(),
+            [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]
+        );
+    }
+
+    #[test]
+    fn mac_rejects_malformed() {
+        assert!(parse_mac("52:54:00:d2:f0").is_err()); // too few
+        assert!(parse_mac("52:54:00:d2:f0:01:02").is_err()); // too many
+        assert!(parse_mac("52:54:00:zz:f0:01").is_err()); // non-hex
+    }
+
+    #[test]
+    fn mem_g_suffix() {
+        assert_eq!(mem_mib("8G").unwrap(), 8192);
+        assert_eq!(mem_mib("1G").unwrap(), 1024);
+        assert!(mem_mib("512M").is_err());
+        assert!(mem_mib("8").is_err());
+    }
 }
 
 unsafe fn add_disk(ctx: u32, index: usize, disk: &Disk) -> Result<()> {

@@ -56,12 +56,13 @@ features = ["blk", "net"]
 optional = true
 
 [features]
-default = ["virtiofsd"]
+default = ["virtiofsd", "libkrun"]
 # compile the bundled virtio-fs daemon into virtkit
 virtiofsd = ["dep:virtiofsd", "dep:vhost", "dep:vhost-user-backend", "dep:vm-memory"]
 # the libkrun VMM backend, driven by the `__libkrun-boot` subcommand. libkrun is
 # reached via its C ABI; we always pass our own kernel (krun_set_kernel) so it
 # never loads libkrunfw. Its rust-vmm deps (vm-memory 0.17, …) coexist with the
 # bundled virtiofsd's (0.16) — independent subsystems, so no version unification.
-# Off by default until the backend is feature-complete.
+# On by default: libkrun is the default backend when it can run the job (see
+# vmm::libkrun_selected); cloud-hypervisor stays the fallback.
 libkrun = ["dep:krun"]

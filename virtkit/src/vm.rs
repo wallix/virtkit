@@ -127,20 +127,26 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
     let mut shares: Vec<crate::vmm::FsShare> = Vec::new();
     if let Some(share) = &cfg.share {
         let vfsd_sock = ctx.vfsd_sock();
-        let mut vfsd = cfg.virtiofsd_command(); // bundled `virtkit virtiofsd` unless configured
-        vfsd.arg(format!("--socket-path={}", vfsd_sock.display()))
-            .arg(format!("--shared-dir={}", share.dir.display()))
-            .args(["--cache=auto", "--sandbox=none"]);
-        if share.readonly {
-            vfsd.arg("--readonly");
+        // libkrun mounts the host dir directly (built-in virtio-fs); only
+        // cloud-hypervisor needs an external virtiofsd on the socket.
+        if !crate::vmm::libkrun_selected() {
+            let mut vfsd = cfg.virtiofsd_command(); // bundled `virtkit virtiofsd` unless configured
+            vfsd.arg(format!("--socket-path={}", vfsd_sock.display()))
+                .arg(format!("--shared-dir={}", share.dir.display()))
+                .args(["--cache=auto", "--sandbox=none"]);
+            if share.readonly {
+                vfsd.arg("--readonly");
+            }
+            let child = spawn_detached(vfsd, &ctx.vfsd_log()).context("spawning virtiofsd")?;
+            std::fs::write(ctx.vfsd_pidfile(), child.id().to_string())?;
+            wait_for_socket(&vfsd_sock, Duration::from_secs(5))
+                .context("virtiofsd did not create its socket")?;
         }
-        let child = spawn_detached(vfsd, &ctx.vfsd_log()).context("spawning virtiofsd")?;
-        std::fs::write(ctx.vfsd_pidfile(), child.id().to_string())?;
-        wait_for_socket(&vfsd_sock, Duration::from_secs(5))
-            .context("virtiofsd did not create its socket")?;
         shares.push(crate::vmm::FsShare {
             tag: "workdir".into(),
             socket: vfsd_sock,
+            host_dir: share.dir.clone(),
+            read_only: share.readonly,
         });
     }
 
@@ -151,18 +157,22 @@ pub async fn prepare(ctx: &JobCtx) -> Result<()> {
         && let Some(dir) = &gl.dir
     {
         let sock = ctx.tools_vfsd_sock();
-        let mut vfsd = cfg.virtiofsd_command();
-        vfsd.arg(format!("--socket-path={}", sock.display()))
-            .arg(format!("--shared-dir={}", dir.display()))
-            .args(["--cache=auto", "--sandbox=none", "--readonly"]);
-        let child =
-            spawn_detached(vfsd, &ctx.tools_vfsd_log()).context("spawning the tools virtiofsd")?;
-        std::fs::write(ctx.tools_vfsd_pidfile(), child.id().to_string())?;
-        wait_for_socket(&sock, Duration::from_secs(5))
-            .context("the tools virtiofsd did not create its socket")?;
+        if !crate::vmm::libkrun_selected() {
+            let mut vfsd = cfg.virtiofsd_command();
+            vfsd.arg(format!("--socket-path={}", sock.display()))
+                .arg(format!("--shared-dir={}", dir.display()))
+                .args(["--cache=auto", "--sandbox=none", "--readonly"]);
+            let child = spawn_detached(vfsd, &ctx.tools_vfsd_log())
+                .context("spawning the tools virtiofsd")?;
+            std::fs::write(ctx.tools_vfsd_pidfile(), child.id().to_string())?;
+            wait_for_socket(&sock, Duration::from_secs(5))
+                .context("the tools virtiofsd did not create its socket")?;
+        }
         shares.push(crate::vmm::FsShare {
             tag: "vktools".into(),
             socket: sock,
+            host_dir: dir.clone(),
+            read_only: true,
         });
         cmdline.push_str(" VIRTKIT_TOOLS=vktools:/run/virtkit-tools");
     }

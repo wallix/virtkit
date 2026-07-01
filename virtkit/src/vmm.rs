@@ -49,11 +49,16 @@ impl Disk {
     }
 }
 
-/// A virtio-fs share: the tag the guest mounts by and the virtiofsd socket.
+/// A virtio-fs share: the tag the guest mounts by, plus the two ways a backend
+/// serves it. cloud-hypervisor connects to an external virtiofsd on `socket`; libkrun
+/// has no external vhost-user-fs, so it mounts `host_dir` directly with its built-in
+/// virtio-fs (and no separate virtiofsd is spawned — see the boot sites).
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct FsShare {
     pub tag: String,
     pub socket: PathBuf,
+    pub host_dir: PathBuf,
+    pub read_only: bool,
 }
 
 /// Guest networking. `switch`-mode guests add no device here — the in-guest agent
@@ -231,12 +236,19 @@ impl Vmm for Libkrun {
     }
 }
 
-/// Whether the libkrun backend is selected: compiled in (the `libkrun` feature) and
-/// requested via `VIRTKIT_VMM=libkrun`. Read on each call so every CI phase
+/// Whether the libkrun backend is selected. libkrun is the default when it is compiled
+/// in (the `libkrun` feature); set `VIRTKIT_VMM=cloud-hypervisor` to opt out — e.g. for
+/// Windows guests, which libkrun cannot boot. Read on each call so every CI phase
 /// (prepare/run/cleanup run as separate processes) agrees — gitlab-runner passes the
 /// same environment to each exec.
 pub fn libkrun_selected() -> bool {
-    cfg!(feature = "libkrun") && std::env::var_os("VIRTKIT_VMM").is_some_and(|v| v == "libkrun")
+    if !cfg!(feature = "libkrun") {
+        return false;
+    }
+    !matches!(
+        std::env::var("VIRTKIT_VMM").ok().as_deref(),
+        Some("cloud-hypervisor") | Some("cloud_hypervisor") | Some("ch")
+    )
 }
 
 /// The selected VMM backend for a boot.
@@ -290,6 +302,8 @@ mod tests {
             shares: vec![FsShare {
                 tag: "workdir".into(),
                 socket: "/job/vfsd.sock".into(),
+                host_dir: "/host/workdir".into(),
+                read_only: false,
             }],
             vsock_cid: 3,
             vsock_socket: "/job/vsock.sock".into(),

@@ -284,17 +284,23 @@ async fn build_and_boot(args: &RunArgs, work: &Path) -> Result<()> {
     let mut virtiofsd: Option<Child> = None;
     let shared_mem = if let Some(host_dir) = &args.workdir {
         let sock = work.join("workdir.fs.sock");
-        virtiofsd = Some(crate::fleet::spawn_virtiofsd(
-            &sock,
-            host_dir,
-            false,
-            &[],
-            &[],
-        )?);
+        // libkrun mounts host_dir directly (built-in virtio-fs); only cloud-hypervisor
+        // needs the external virtiofsd on `sock`.
+        if !crate::vmm::libkrun_selected() {
+            virtiofsd = Some(crate::fleet::spawn_virtiofsd(
+                &sock,
+                host_dir,
+                false,
+                &[],
+                &[],
+            )?);
+        }
         cmdline.push_str(&format!(" VIRTKIT_VIRTIOFS=work:{WORKDIR_MOUNT}"));
         shares.push(crate::vmm::FsShare {
             tag: "work".into(),
             socket: sock,
+            host_dir: host_dir.clone(),
+            read_only: false,
         });
         true
     } else {
@@ -781,11 +787,15 @@ pub(crate) async fn boot_session(
     let mut virtiofsd: Option<Child> = None;
     if let Some(ctx) = context {
         let sock = work.join("context.fs.sock");
-        virtiofsd = Some(crate::fleet::spawn_virtiofsd(&sock, ctx, true, &[], &[])?);
+        if !crate::vmm::libkrun_selected() {
+            virtiofsd = Some(crate::fleet::spawn_virtiofsd(&sock, ctx, true, &[], &[])?);
+        }
         cmdline.push_str(&format!(" VIRTKIT_VIRTIOFS=context:{CONTEXT_MOUNT}"));
         shares.push(crate::vmm::FsShare {
             tag: "context".into(),
             socket: sock,
+            host_dir: ctx.to_path_buf(),
+            read_only: true,
         });
     }
 

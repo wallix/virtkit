@@ -22,7 +22,7 @@ use anyhow::{Result, bail};
 // (rlib -> shares virtkit's std; compiler-checked signatures). Every call returns
 // >= 0 on success, a negative errno on failure.
 use krun::{
-    krun_add_disk2, krun_add_net_tap, krun_add_vsock_port2, krun_create_ctx,
+    krun_add_disk2, krun_add_net_tap, krun_add_virtiofs3, krun_add_vsock_port2, krun_create_ctx,
     krun_disable_implicit_init, krun_init_log, krun_set_console_output, krun_set_kernel,
     krun_set_vm_config, krun_start_enter,
 };
@@ -120,6 +120,18 @@ pub fn boot(spec: &VmSpec) -> Result<()> {
         // backing chain (KRUN_DISK_FORMAT_QCOW2); raw bases use KRUN_DISK_FORMAT_RAW.
         for (i, disk) in spec.disks.iter().enumerate() {
             add_disk(ctx, i, disk)?;
+        }
+
+        // virtio-fs shares. libkrun has no external vhost-user-fs, so it mounts the host
+        // directory directly with its built-in virtio-fs; no separate virtiofsd runs
+        // (the boot sites skip it when libkrun is selected). shm_size 0 = no DAX window.
+        for share in &spec.shares {
+            let tag = cstr(&share.tag);
+            let dir = cstr(&share.host_dir.to_string_lossy());
+            ck(
+                "krun_add_virtiofs3",
+                krun_add_virtiofs3(ctx, tag.as_ptr(), dir.as_ptr(), 0, share.read_only),
+            )?;
         }
 
         // Networking. Net::Tap attaches a host tap by name (like CH's `--net tap=,mac=`);

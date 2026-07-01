@@ -494,29 +494,12 @@ fn mount_virtiofs(cmdline: &HashMap<String, String>) {
     };
     let _ = run_cmd("modprobe", &["virtiofs"]); // built-in on our kernel; harmless
     for entry in spec.split(',').filter(|e| !e.is_empty()) {
-        // tag:path, with an optional trailing ":dax" the host adds when it offered a DAX
-        // window for the share (see vk-driver's vmm::dax_enabled).
-        let mut parts = entry.splitn(3, ':');
-        let (Some(tag), Some(path)) = (parts.next(), parts.next()) else {
+        let Some((tag, path)) = entry.split_once(':') else {
             warn!("virtkit-agent init: bad VIRTKIT_VIRTIOFS entry {entry:?} (want tag:path)");
             continue;
         };
-        let dax = parts.next() == Some("dax");
         let _ = std::fs::create_dir_all(path);
-        // DAX is best-effort: if the `-o dax` mount is rejected, fall back to a plain
-        // virtio-fs mount so the share still comes up (just without DAX).
-        let mut res = if dax {
-            mount_data(tag, path, "virtiofs", 0, "dax")
-        } else {
-            mount(tag, path, "virtiofs", 0)
-        };
-        if dax && let Err(e) = &res {
-            warn!(
-                "virtkit-agent init: virtiofs {tag} DAX mount failed ({e}); retrying without DAX"
-            );
-            res = mount(tag, path, "virtiofs", 0);
-        }
-        if let Err(e) = res {
+        if let Err(e) = mount(tag, path, "virtiofs", 0) {
             warn!("virtkit-agent init: mount virtiofs {tag} at {path} failed: {e}");
         }
     }

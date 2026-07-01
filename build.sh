@@ -33,13 +33,11 @@ since()   { echo "build.sh: $1 in $(fmt_dur $(($SECONDS - $2)))" >&2; }
 USE_VIRTKIT=""
 BOOTSTRAP_CHECK=""
 VMM=libkrun          # dogfood VMM backend: libkrun (default) or cloud-hypervisor
-DAX=""               # opt-in libkrun virtio-fs DAX for the dogfood compile
 for arg in "$@"; do
   case "$arg" in
     --use-virtkit=*) USE_VIRTKIT="${arg#*=}" ;;
     --bootstrap-check) BOOTSTRAP_CHECK=1 ;;
     --vmm=libkrun|--vmm=cloud-hypervisor) VMM="${arg#*=}" ;;
-    --dax) DAX=1 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -105,8 +103,7 @@ if [ -n "$USE_VIRTKIT" ]; then
   [ -e "$VK" ] || { echo "missing $VK (need a populated --use-virtkit dir)" >&2; exit 1; }
 
   # VMM backend: built-in libkrun by default (no external binary); cloud-hypervisor for
-  # a comparison run needs the CH binary and VIRTKIT_VMM set. --dax opts the libkrun
-  # virtio-fs /work share into DAX (a perf experiment; libkrun only).
+  # a comparison run needs the CH binary and VIRTKIT_VMM set.
   vmm_env=()
   ch_args=()
   if [ "$VMM" = cloud-hypervisor ]; then
@@ -119,7 +116,6 @@ if [ -n "$USE_VIRTKIT" ]; then
     vmm_env+=(VIRTKIT_VMM=cloud-hypervisor)
     ch_args=(--cloud-hypervisor "$ch")
   fi
-  [ -n "$DAX" ] && vmm_env+=(VIRTKIT_DAX=1)
 
   cache_args=()
   [ -n "${VK_CACHE:-}" ] && cache_args=(--cache-registry "$VK_CACHE")
@@ -162,7 +158,7 @@ else
     "$IMAGE" \
     sh -c "$BUILD_CMD"
 fi
-since "compile ($([ -n "$USE_VIRTKIT" ] && echo "$VMM microVM${DAX:+ +dax}" || echo docker))" "$compile_start"
+since "compile ($([ -n "$USE_VIRTKIT" ] && echo "$VMM microVM" || echo docker))" "$compile_start"
 
 mkdir -p "$OUT"
 # Replace atomically (write a temp, then rename): a plain cp truncates the destination and
@@ -224,9 +220,9 @@ if [ -n "$BOOTSTRAP_CHECK" ]; then
   mkdir -p "$boot_tmp/$OUT"
   cp "$boot_dist/vmlinux" "$boot_tmp/$OUT/vmlinux"
   rebuild_start=$SECONDS
-  # Same VMM/DAX choice as requested, and the commit threaded in (the copy has no .git).
+  # Same VMM choice as requested, and the commit threaded in (the copy has no .git).
   ( cd "$boot_tmp" && VK_GIT_COMMIT="$commit" ./build.sh \
-      --use-virtkit="$boot_dist" --vmm="$VMM" ${DAX:+--dax} )
+      --use-virtkit="$boot_dist" --vmm="$VMM" )
   since "bootstrap rebuild" "$rebuild_start"
 
   echo

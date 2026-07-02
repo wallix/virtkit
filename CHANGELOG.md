@@ -4,6 +4,16 @@ All notable changes to virtkit will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `run` boots images from a native ext4 disk by default; the in-RAM cpio boot
+  moves behind a new `--ram` flag, which replaces `--disk`.
+
+### Fixed
+
+- a cpio (`--ram`) boot refuses an initramfs that cannot unpack in `--mem`,
+  naming the required size instead of dying before the guest console comes up.
+
 ## [0.4.0] - 2026-07-02
 
 ### Changed

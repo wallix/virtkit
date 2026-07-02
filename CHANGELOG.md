@@ -11,6 +11,9 @@ All notable changes to virtkit will be documented in this file.
 
 ### Fixed
 
+- the executor picks the run-stage shell by probing the booted guest for bash
+  instead of guessing from the boot medium: bash-less OCI images (alpine,
+  distroless) converted with `[convert] generic_disk = true` were piped to bash.
 - a cpio (`--ram`) boot refuses an initramfs that cannot unpack in `--mem`,
   naming the required size instead of dying before the guest console comes up.
 

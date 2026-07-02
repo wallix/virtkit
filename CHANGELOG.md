@@ -6,6 +6,9 @@ All notable changes to virtkit will be documented in this file.
 
 ### Changed
 
+- Generic images boot from a native ext4 disk everywhere: the executor's cpio
+  bundle mode is removed outright — `[convert] generic_disk` is gone and stale
+  cpio bundles reconvert automatically.
 - `run` boots images from a native ext4 disk by default; the in-RAM cpio boot
   moves behind a new `--ram` flag, which replaces `--disk`.
 
